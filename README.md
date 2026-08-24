@@ -1,5 +1,5 @@
-# Mission Overview & Objectives
-### CDE2310 — Fundamentals of Systems Design | AY 2025–26 | Group 12
+# Mission Overview & Objectives (TO CHANGE DISC)
+### CDE1302 — Introduction to UAVs: From Basics to Autonomous Missions | AY 2026–27 | Group 2
 
 ---
 
