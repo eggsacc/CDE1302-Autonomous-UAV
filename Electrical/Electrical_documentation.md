@@ -1,4 +1,4 @@
-# Electrical Documentation
+# Electrical Documentation (OLD) - to change for CDE1302
 
 ## Components Used
 * **TurtleBot Core:** Raspberry Pi, OpenCR, LiDAR, RPi Camera (Powered by 3S 11.1V LiPo)
