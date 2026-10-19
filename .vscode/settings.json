@@ -1,0 +1,5 @@
+{
+    "cmake.sourceDirectory": "C:/GithubRepos/cde1302repo/CDE1302-Autonomous-UAV/cde1302",
+    "python-envs.defaultEnvManager": "ms-python.python:conda",
+    "python-envs.defaultPackageManager": "ms-python.python:conda"
+}
