@@ -1,2 +1,5 @@
 # Per-run mission logs; copy the runs you want for the report somewhere tracked.
 logs/
+
+# Test scratch folders (see tests/conftest.py)
+tests/.pytest_tmp/
