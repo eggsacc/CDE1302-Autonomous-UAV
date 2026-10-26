@@ -2,6 +2,8 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
+#include "traj_yaw.h"
 #include "vfh.h"
 
 /* ---------------------------------------------------------------------------
@@ -90,6 +92,11 @@ void nav_traj_put(uint8_t id, uint16_t total, uint16_t offset,
  * holding the current heading. Refused unless the upload is complete and the
  * drone is armed in OFFBOARD. Each upload plays once. Ends in NAV_ARRIVED. */
 void nav_traj_start(uint8_t id, uint16_t dt_ms);
+
+/* Versioned yaw requests. No arming/mode changes. Reply goes to the requester.
+ * START additionally requires mission FLYING, fresh state and aligned yaw. */
+bool nav_traj_yaw_command(const uint8_t *packet, size_t length,
+                           bool mission_flying, uint8_t reply[TY_REPLY_SIZE]);
 
 /* Thread-safe status snapshot. */
 nav_status_t nav_get_status(void);

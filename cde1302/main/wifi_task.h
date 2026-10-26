@@ -52,6 +52,12 @@ typedef struct __attribute__((packed)) {
     uint8_t  is_stuck;                      /* 1 = STUCK or RETREATING          */
 
     uint16_t reloc_age_s;                   /* always 0xFFFF (no nav-tag fixes) */
+    /* Additive diagnostic trailer; legacy laptop parsers read the same prefix. */
+    uint16_t px4_hb_age_ms;                 /* saturated; 0xFFFF = unavailable */
+    uint16_t px4_pos_age_ms;
+    uint8_t  px4_armed;
+    uint8_t  px4_custom_main_mode;
+    uint8_t  px4_custom_sub_mode;
 } wifi_telem_pkt_t;
 
 /* ---------------------------------------------------------------------------
@@ -74,6 +80,11 @@ typedef struct __attribute__((packed)) {
 #define CMD_CAMERA_STREAM 0x07   /* keepalive: pkt, cmd, enable, max_fps, quality */
 #define CMD_TRAJ_DATA     0x08   /* pkt, cmd, id, total(u16), offset(u16), n, n × (x,y,z) f32 */
 #define CMD_TRAJ_START    0x09   /* pkt, cmd, id, dt_ms(u16) */
+#define CMD_YAW_CAPS      0x0A   /* versioned yaw protocol; see traj_yaw.h */
+#define CMD_YAW_BEGIN     0x0B
+#define CMD_YAW_DATA      0x0C
+#define CMD_YAW_START     0x0D
+#define CMD_YAW_STATUS    0x0E
 
 /* Largest command datagram (a CMD_TRAJ_DATA chunk of 80 points is 968 B). */
 #define WIFI_CMD_BUF_SIZE 1024

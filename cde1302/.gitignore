@@ -19,5 +19,13 @@ __pycache__/
 venv/
 .venv/
 
+# Flight/simulation records stay local, including identifying log metadata.
+logs/
+*.ulg
+*.ulog
+sdkconfig.yaw-drone2
+sdkconfig.yaw-drone2.old
+build-yaw-drone2/
+
 # macOS
 .DS_Store

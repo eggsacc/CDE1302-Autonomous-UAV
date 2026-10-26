@@ -1,0 +1,7 @@
+# Minimal trajectory generation/upload, local plotting and tests (Python 3.10+).
+# Install separately from camera/AprilTag packages if only running this experiment.
+numpy>=1.24
+PyYAML>=6.0
+matplotlib>=3.7
+pytest>=7
+pyulog>=1.1

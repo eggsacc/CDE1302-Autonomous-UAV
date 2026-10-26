@@ -5,6 +5,7 @@ idf_component_register(
         "tof_task.c"
         "vfh.c"
         "nav_task.c"
+        "traj_yaw.c"
         "at_detect.c"
         "camera_stream.c"
         "wifi_task.c"

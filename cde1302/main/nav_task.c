@@ -47,6 +47,15 @@ static uint16_t   s_traj_dt_ms;
 static float      s_traj_org[3];   /* odom position where playback started        */
 static float      s_traj_yaw;
 static int64_t    s_traj_t0_us;
+static ty_upload_t s_yaw_upload;
+static bool       s_traj_has_yaw;
+
+static traj_pt_t trajectory_point(int i)
+{
+    if (!s_traj_has_yaw) return s_traj[i];
+    ty_point_t p = s_yaw_upload.points[i];
+    return (traj_pt_t){p.x, p.y, p.z};
+}
 
 /* ---------------------------------------------------------------------------
  * Helpers
@@ -232,19 +241,42 @@ static bool collision_avoid(float goal_z)
  * --------------------------------------------------------------------------- */
 static void traj_tick(void)
 {
+    /* Serialise playback with HOLD, a new goal and upload writes. A cancelled
+     * tick must never overwrite the hold setpoint from another task. */
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    if (s_nav.state != NAV_TRAJ) {
+        xSemaphoreGive(s_mutex);
+        return;
+    }
+    if (s_traj_has_yaw) {
+        drone_state_t st = mavlink_get_state();
+        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        if (!st.armed || st.custom_main_mode != PX4_MAIN_MODE_OFFBOARD ||
+            !mavlink_position_valid() || now_ms - st.last_att_ms > 300 ||
+            now_ms - st.last_hb_ms > 1500) {
+            ty_cancel(&s_yaw_upload);
+            s_nav.state = s_status.state = NAV_IDLE;
+            s_nav.has_goal = false;
+            mavlink_set_hold();
+            xSemaphoreGive(s_mutex);
+            ESP_LOGW(TAG, "Yaw trajectory cancelled: stale state or RC/mode takeover");
+            return;
+        }
+    }
     float k    = (float)(esp_timer_get_time() - s_traj_t0_us) / (1000.0f * s_traj_dt_ms);
     int   last = s_traj_n - 1;
 
     if (k >= (float)last) {
-        const traj_pt_t *p = &s_traj[last];
-        mavlink_set_position_ned(s_traj_org[0] + p->x, s_traj_org[1] + p->y,
-                                 s_traj_org[2] + p->z, s_traj_yaw);
-        xSemaphoreTake(s_mutex, portMAX_DELAY);
+        traj_pt_t p = trajectory_point(last);
+        float yaw = s_traj_has_yaw ? ty_wrap(s_yaw_upload.points[last].yaw) : s_traj_yaw;
+        mavlink_set_position_ned(s_traj_org[0] + p.x, s_traj_org[1] + p.y,
+                                 s_traj_org[2] + p.z, yaw);
         if (s_nav.state == NAV_TRAJ) {
             s_nav.state    = NAV_ARRIVED;
             s_nav.has_goal = false;
             s_status.state = NAV_ARRIVED;
         }
+        if (s_traj_has_yaw) s_yaw_upload.state = TY_DONE;
         xSemaphoreGive(s_mutex);
         ESP_LOGI(TAG, "Trajectory done — holding last point");
         return;
@@ -253,14 +285,19 @@ static void traj_tick(void)
     int   i  = (int)k;
     float a  = k - (float)i;
     float hz = 1000.0f / (float)s_traj_dt_ms;
-    const traj_pt_t *p0 = &s_traj[i], *p1 = &s_traj[i + 1];
+    traj_pt_t point0 = trajectory_point(i), point1 = trajectory_point(i + 1);
+    const traj_pt_t *p0 = &point0, *p1 = &point1;
+    float yaw = s_traj_has_yaw ? ty_interpolate_yaw(s_yaw_upload.points[i].yaw,
+                                                   s_yaw_upload.points[i+1].yaw, a)
+                               : s_traj_yaw;
 
     mavlink_set_position_velocity_ned(
         s_traj_org[0] + p0->x + a * (p1->x - p0->x),
         s_traj_org[1] + p0->y + a * (p1->y - p0->y),
         s_traj_org[2] + p0->z + a * (p1->z - p0->z),
         (p1->x - p0->x) * hz, (p1->y - p0->y) * hz, (p1->z - p0->z) * hz,
-        s_traj_yaw);
+        yaw);
+    xSemaphoreGive(s_mutex);
 }
 
 /* ---------------------------------------------------------------------------
@@ -382,11 +419,16 @@ void nav_task_init(void)
 
     s_traj = heap_caps_calloc(NAV_TRAJ_MAX_PTS, sizeof(traj_pt_t), MALLOC_CAP_SPIRAM);
     configASSERT(s_traj != NULL);
+    _Static_assert(NAV_TRAJ_MAX_PTS == TY_MAX_POINTS, "trajectory capacities differ");
+    ty_point_t *yaw_points = heap_caps_calloc(TY_MAX_POINTS, sizeof(ty_point_t), MALLOC_CAP_SPIRAM);
+    configASSERT(yaw_points != NULL);
+    ty_init(&s_yaw_upload, yaw_points);
 }
 
 void nav_set_goal_map(float map_x, float map_y, float z)
 {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
+    ty_cancel(&s_yaw_upload);
     s_nav.goal_map_x      = map_x;
     s_nav.goal_map_y      = map_y;
     s_nav.goal_z          = z;
@@ -406,6 +448,7 @@ void nav_cancel(void)
 {
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     bool active    = s_nav.has_goal;
+    ty_cancel(&s_yaw_upload);
     s_nav.state    = NAV_IDLE;
     s_nav.has_goal = false;
     s_status.state = NAV_IDLE;
@@ -425,10 +468,17 @@ void nav_traj_put(uint8_t id, uint16_t total, uint16_t offset,
                  id, total, offset, n);
         return;
     }
+    /* Reject nonfinite XYZ atomically, including Y/Z and infinity. */
+    for (int i = 0; i < n * 3; i++) {
+        float v;
+        memcpy(&v, (const uint8_t *)xyz + i * sizeof(float), sizeof(v));
+        if (!isfinite(v)) return;
+    }
 
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     bool playing = (s_nav.state == NAV_TRAJ);
     if (!playing) {
+        ty_cancel(&s_yaw_upload);
         if (id != s_traj_id || total != s_traj_n) {     /* new upload */
             for (int i = 0; i < total; i++) s_traj[i].x = NAN;
             s_traj_id = id;
@@ -451,16 +501,18 @@ void nav_traj_start(uint8_t id, uint16_t dt_ms)
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     if (s_nav.state == NAV_TRAJ)          err = "already playing";
     else if (id == 0 || id != s_traj_id) err = "unknown upload id";
-    else if (dt_ms == 0)                 err = "dt_ms is 0";
+    else if (dt_ms == 0 || dt_ms > 1000)  err = "dt_ms out of bounds";
     else if (!flying)                    err = "not armed in OFFBOARD";
     for (int i = 0; !err && i < s_traj_n; i++) {
-        if (isnan(s_traj[i].x)) err = "upload incomplete";
+        if (!isfinite(s_traj[i].x) || !isfinite(s_traj[i].y) || !isfinite(s_traj[i].z))
+            err = "upload incomplete/invalid";
     }
     if (!err) {
         s_traj_org[0] = st.x;
         s_traj_org[1] = st.y;
         s_traj_org[2] = st.z;
         s_traj_yaw    = st.heading;
+        s_traj_has_yaw = false;
         s_traj_dt_ms  = dt_ms;
         s_traj_t0_us  = esp_timer_get_time();
         s_traj_id     = 0;              /* consume: a repeated START cannot replay */
@@ -477,6 +529,37 @@ void nav_traj_start(uint8_t id, uint16_t dt_ms)
         ESP_LOGI(TAG, "Trajectory start: %u pts @ %u ms from odom (%.2f, %.2f, %.2f)",
                  n, dt_ms, st.x, st.y, st.z);
     }
+}
+
+bool nav_traj_yaw_command(const uint8_t *packet, size_t length,
+                           bool mission_flying, uint8_t reply[TY_REPLY_SIZE])
+{
+    drone_state_t st = mavlink_get_state();
+    uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+    bool flying = mission_flying && st.armed && mavlink_position_valid()
+                  && st.custom_main_mode == PX4_MAIN_MODE_OFFBOARD
+                  && now_ms - st.last_att_ms <= 300
+                  && now_ms - st.last_hb_ms <= 1500;
+    xSemaphoreTake(s_mutex, portMAX_DELAY);
+    bool was_playing = s_yaw_upload.state == TY_PLAYING;
+    bool busy = s_nav.state == NAV_TRAJ && !s_traj_has_yaw;
+    bool respond = ty_handle(&s_yaw_upload, packet, length, CONFIG_DRONE_ID,
+                              busy, flying, st.heading, reply);
+    if (respond && packet[1] == TY_CMD_BEGIN &&
+            (s_yaw_upload.state == TY_UPLOADING || s_yaw_upload.state == TY_READY))
+        s_traj_id = 0; /* legacy START cannot accidentally play a stale upload */
+    if (respond && !was_playing && s_yaw_upload.state == TY_PLAYING) {
+        s_traj_org[0] = st.x; s_traj_org[1] = st.y; s_traj_org[2] = st.z;
+        s_traj_n = s_yaw_upload.total;
+        s_traj_dt_ms = s_yaw_upload.dt_ms;
+        s_traj_t0_us = esp_timer_get_time();
+        s_traj_has_yaw = true;
+        s_nav.state = s_status.state = NAV_TRAJ;
+        s_nav.has_goal = true;
+        ESP_LOGI(TAG, "Tangent yaw v1 started: %u points @ %u ms", s_traj_n, s_traj_dt_ms);
+    }
+    xSemaphoreGive(s_mutex);
+    return respond;
 }
 
 nav_status_t nav_get_status(void)

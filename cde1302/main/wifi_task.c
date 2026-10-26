@@ -24,6 +24,12 @@
 
 static const char *TAG = "wifi";
 
+static uint16_t telemetry_age(uint32_t now, uint32_t last)
+{
+    uint32_t age = now - last;
+    return !last || age > 0xFFFFu ? 0xFFFFu : (uint16_t)age;
+}
+
 #define WIFI_CONNECTED_BIT  BIT0
 
 /* Cruise altitude for CMD_GOTO — must match CRUISE_ALT_M in main.c */
@@ -295,7 +301,7 @@ static void handle_traj_data(const uint8_t *buf, int len)
     memcpy(&total,  buf + 3, sizeof(total));
     memcpy(&offset, buf + 5, sizeof(offset));
     int n = buf[7];
-    if (len < 8 + n * 12) {
+    if (len != 8 + n * 12) {
         ESP_LOGW(TAG, "CMD_TRAJ_DATA truncated (%d < %d)", len, 8 + n * 12);
         return;
     }
@@ -305,7 +311,7 @@ static void handle_traj_data(const uint8_t *buf, int len)
 /* CMD_TRAJ_START: pkt, cmd, id, dt_ms(u16) */
 static void handle_traj_start(const uint8_t *buf, int len)
 {
-    if (len < 5) return;
+    if (len != 5) return;
     if (s_phase != MISSION_FLYING) {
         ESP_LOGW(TAG, "CMD_TRAJ_START ignored — not flying");
         return;
@@ -391,15 +397,22 @@ void wifi_task(void *arg)
     while (1) {
         /* ---- Drain all queued commands (non-blocking) ---- */
         {
-            uint8_t cmd_buf[WIFI_CMD_BUF_SIZE];
+            /* One extra byte detects oversized/truncated UDP datagrams. */
+            uint8_t cmd_buf[WIFI_CMD_BUF_SIZE + 1];
             int len;
             struct sockaddr_in source;
             socklen_t source_len;
             while (source_len = sizeof(source),
                    (len = recvfrom(rx_sock, cmd_buf, sizeof(cmd_buf), 0,
                                    (struct sockaddr *)&source, &source_len)) > 0) {
-                if (len < 2 || cmd_buf[0] != WIFI_PKT_CMD) continue;
-                if (cmd_buf[1] == CMD_TRAJ_DATA) {
+                if (len > WIFI_CMD_BUF_SIZE || len < 2 || cmd_buf[0] != WIFI_PKT_CMD) continue;
+                if (cmd_buf[1] >= CMD_YAW_CAPS && cmd_buf[1] <= CMD_YAW_STATUS) {
+                    uint8_t reply[TY_REPLY_SIZE];
+                    if (nav_traj_yaw_command(cmd_buf, (size_t)len,
+                                              s_phase == MISSION_FLYING, reply))
+                        sendto(rx_sock, reply, sizeof(reply), 0,
+                               (const struct sockaddr *)&source, source_len);
+                } else if (cmd_buf[1] == CMD_TRAJ_DATA) {
                     handle_traj_data(cmd_buf, len);
                 } else if (cmd_buf[1] == CMD_TRAJ_START) {
                     handle_traj_start(cmd_buf, len);
@@ -443,6 +456,13 @@ void wifi_task(void *arg)
             pkt.vfh_blocked[b] = ns.vfh_blocked[b] ? 1 : 0;
 
         pkt.reloc_age_s = 0xFFFF;   /* never relocalised */
+        uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
+        pkt.px4_hb_age_ms = telemetry_age(now_ms, drone.last_hb_ms);
+        pkt.px4_pos_age_ms = telemetry_age(now_ms, drone.last_pos_ms);
+        pkt.px4_armed = drone.armed ? 1 : 0;
+        pkt.px4_custom_main_mode = drone.custom_main_mode;
+        pkt.px4_custom_sub_mode = drone.custom_sub_mode;
+        _Static_assert(sizeof(wifi_telem_pkt_t) == 62, "telemetry trailer layout changed");
 
         /* ---- Send telemetry ---- */
         send(tx_sock, &pkt, sizeof(pkt), 0);

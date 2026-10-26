@@ -77,6 +77,19 @@ class TelemetryPacket:
     vfh_blocked: list            # VFH_BINS bools
     is_stuck:    bool
     reloc_age_s: int              # seconds since last nav-tag fix (0xFFFF = never)
+    # Optional additive trailer. Legacy 55-byte firmware yields None, never
+    # fabricated armed/mode/link status. The original 55-byte prefix is intact.
+    px4_hb_age_ms: int | None = None
+    px4_pos_age_ms: int | None = None
+    px4_armed: int | None = None
+    px4_custom_main_mode: int | None = None
+    px4_custom_sub_mode: int | None = None
+
+    @property
+    def px4_link_ok(self) -> bool | None:
+        if self.px4_hb_age_ms is None or self.px4_pos_age_ms is None:
+            return None
+        return self.px4_hb_age_ms <= 1500 and self.px4_pos_age_ms <= 500
 
     @property
     def nav_state_name(self) -> str:
@@ -98,6 +111,11 @@ def parse_telemetry(data: bytes) -> Optional[TelemetryPacket]:
 
     vfh_blocked = [bool(b) for b in vfh_raw]
 
+    extra = {}
+    if len(data) >= _TELEM_HDR_SIZE + 7:
+        names = ("px4_hb_age_ms", "px4_pos_age_ms", "px4_armed",
+                 "px4_custom_main_mode", "px4_custom_sub_mode")
+        extra = dict(zip(names, struct.unpack_from("<HHBBB", data, _TELEM_HDR_SIZE)))
     return TelemetryPacket(
         drone_id    = drone_id,
         ned_x       = ned_x,
@@ -109,6 +127,7 @@ def parse_telemetry(data: bytes) -> Optional[TelemetryPacket]:
         vfh_blocked = vfh_blocked,
         is_stuck    = bool(is_stuck),
         reloc_age_s = reloc_age_s,
+        **extra,
     )
 
 # ---------------------------------------------------------------------------
@@ -319,6 +338,105 @@ def build_traj_packets(traj_id: int, pts) -> list[bytes]:
 def build_traj_start(traj_id: int, dt_ms: int) -> bytes:
     """CMD_TRAJ_START: play upload traj_id, one point every dt_ms."""
     return struct.pack("<BBBH", PKT_CMD, CMD_TRAJ_START, traj_id, dt_ms)
+
+
+# Tangent-yaw protocol v1. Distinct commands; legacy 0x08/0x09 are unchanged.
+# Every request includes version, target drone ID, and a nonzero 32-bit transfer
+# ID. A connected UDP socket receives replies on the request's source port.
+PKT_TRAJ_YAW = 0x05
+CMD_YAW_CAPS = 0x0A
+CMD_YAW_BEGIN = 0x0B
+CMD_YAW_DATA = 0x0C
+CMD_YAW_START = 0x0D
+CMD_YAW_STATUS = 0x0E
+YAW_PROTOCOL_VERSION = 1
+YAW_CHUNK_PTS = 60                  # 11 + 60*16 = 971 bytes <= 1024
+YAW_MIN_DT_MS = 50                  # nav + MAVLink actually run at 20 Hz
+YAW_HARD_MAX_RATE = 1.0             # must match traj_yaw.h; NOT TA approval
+YAW_ALIGNMENT_RAD = math.radians(5)
+YAW_CAPABLE, YAW_UPLOADING, YAW_READY, YAW_PLAYING, YAW_DONE = range(5)
+YAW_BAD_PACKET, YAW_BAD_VERSION, YAW_BAD_ID, YAW_BUSY = range(10, 14)
+YAW_INCOMPLETE, YAW_CORRUPT, YAW_LIMIT, YAW_NOT_FLYING, YAW_MISALIGNED = range(14, 19)
+YAW_CANCELLED = 19
+YAW_REPLY_FMT = "<BBBBIHHHHfff"
+YAW_REPLY_SIZE = struct.calcsize(YAW_REPLY_FMT)  # 28 B
+
+
+def yaw_header(cmd, drone_id, transfer_id):
+    if cmd not in range(CMD_YAW_CAPS, CMD_YAW_STATUS + 1):
+        raise ValueError("invalid yaw command")
+    if not 1 <= drone_id <= 254 or not 1 <= transfer_id <= 0xFFFFFFFF:
+        raise ValueError("invalid drone or transfer ID")
+    return struct.pack("<BBBBI", PKT_CMD, cmd, YAW_PROTOCOL_VERSION,
+                       drone_id, transfer_id)
+
+
+def yaw_payload(points):
+    if not 2 <= len(points) <= TRAJ_MAX_PTS:
+        raise ValueError("yaw trajectory requires 2..2400 samples")
+    out = bytearray()
+    for p in points:
+        if len(p) != 4 or not all(math.isfinite(float(v)) for v in p):
+            raise ValueError("yaw points must be finite x,y,z,yaw")
+        out.extend(struct.pack("<4f", *p))
+    # Check finiteness again after conversion (overflow raises above).
+    return bytes(out)
+
+
+def build_yaw_begin(drone_id, transfer_id, total, dt_ms, max_rate, crc):
+    if not 2 <= total <= TRAJ_MAX_PTS or not YAW_MIN_DT_MS <= dt_ms <= 1000:
+        raise ValueError("yaw count or sample period outside firmware bounds")
+    if not math.isfinite(max_rate) or max_rate <= 0:
+        raise ValueError("max yaw rate must be finite and positive")
+    return yaw_header(CMD_YAW_BEGIN, drone_id, transfer_id) + struct.pack(
+        "<HHfI", total, dt_ms, max_rate, crc)
+
+
+def build_yaw_packets(drone_id, transfer_id, payload):
+    if len(payload) % 16 or not 32 <= len(payload) <= 16 * TRAJ_MAX_PTS:
+        raise ValueError("invalid float32 yaw payload size")
+    out = []
+    for off in range(0, len(payload) // 16, YAW_CHUNK_PTS):
+        chunk = payload[off * 16:(off + YAW_CHUNK_PTS) * 16]
+        out.append(yaw_header(CMD_YAW_DATA, drone_id, transfer_id) +
+                   struct.pack("<HB", off, len(chunk) // 16) + chunk)
+    return out
+
+
+@dataclass(frozen=True)
+class YawReply:
+    version: int
+    drone_id: int
+    command: int
+    transfer_id: int
+    status: int
+    received: int
+    max_points: int
+    min_dt_ms: int
+    max_yaw_rate: float
+    alignment_rad: float
+    heading_rad: float
+
+
+def parse_yaw_reply(data):
+    if len(data) != YAW_REPLY_SIZE:
+        return None
+    ptype, *fields = struct.unpack(YAW_REPLY_FMT, data)
+    if ptype != PKT_TRAJ_YAW:
+        return None
+    return YawReply(*fields)
+
+
+def require_yaw_reply(data, drone_id, transfer_id, command):
+    reply = parse_yaw_reply(data)
+    if reply is None or (reply.version, reply.drone_id, reply.transfer_id, reply.command) != (
+            YAW_PROTOCOL_VERSION, drone_id, transfer_id, command):
+        raise ValueError("wrong firmware/protocol version, target ID, transfer ID, or response type")
+    if (reply.max_points < 2 or reply.min_dt_ms < 1 or
+            not all(math.isfinite(v) for v in (reply.max_yaw_rate, reply.alignment_rad)) or
+            reply.max_yaw_rate <= 0 or not 0 < reply.alignment_rad <= YAW_ALIGNMENT_RAD + 1e-6):
+        raise ValueError("invalid firmware capability bounds")
+    return reply
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ n_segments     = 24;    % ellipse waypoints; tangent constraints preserve shape
 max_speed      = 0.30;  % must match send_trajectory.py's default limit (m/s)
 clockwise      = true;  % viewed from above with North up and East right
 run_simulation = false; % requires Simulink and the position-control toolboxes
+export_tangent_yaw = false; % optional separate CSV; never changes the position solve
 
 assert(semi_major_N > semi_minor_E && semi_minor_E > 0, ...
     'Use positive axes with semi_major_N > semi_minor_E.');
@@ -78,6 +79,10 @@ writetable(table(t, X_n, Y_n, Z_n, ...
     'VariableNames', {'t','x','y','z'}), csv_path);
 
 fprintf('Wrote %s\n', csv_path);
+if export_tangent_yaw
+    write_tangent_yaw_csv(csv_path, ...
+        fullfile(traj_dir, 'ellipse_min_snap_traj_tangent_yaw.csv'), 1e-4);
+end
 fprintf('Footprint: %.2f m North-South x %.2f m East-West\n', ...
     max(X_n)-min(X_n), max(Y_n)-min(Y_n));
 fprintf('Duration: %.1f s; peak speed: %.3f m/s\n', t(end), max(speed));
