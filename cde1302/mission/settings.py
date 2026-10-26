@@ -55,6 +55,8 @@ class Network:
     cmd_port: int = 5006
     camera_port: int = 5009
     connect_timeout_s: float = 30.0
+    pose_history_s: float = 30.0
+    pose_lookup_tolerance_s: float = 0.25
 
 
 @dataclass(frozen=True)
@@ -72,6 +74,8 @@ class Flight:
     land_repeats: int = 3
     repeat_gap_s: float = 0.1
     tick_hz: float = 10.0
+    stop_when_all_found: bool = True
+    land_settle_s: float = 6.0
 
 
 @dataclass(frozen=True)
@@ -96,12 +100,16 @@ class Tags:
     max_pose_err: float = 0.5
     max_detect_range_m: float = 1.5
     max_yaw_rate_deg_s: float = 30.0
-    tags_on_floor: bool = True
+    tags_on_floor: bool = False
     expected_down_m: float = 0.5
     down_tolerance_m: float = 0.15
+    min_down_m: float = -0.5
+    max_down_m: float = 0.65
+    expected_count: int = 0
     min_sightings: int = 5
     confirm_radius_m: float = 0.20
     outlier_radius_m: float = 0.30
+    max_sightings_per_tag: int = 400
 
 
 @dataclass(frozen=True)
@@ -114,6 +122,13 @@ class TrueTag:
 @dataclass(frozen=True)
 class Sim:
     speed: float = 1.0
+    seed: int = 1
+    arm_delay_s: float = 2.0
+    climb_rate_mps: float = 0.2
+    yaw_rate_deg_s: float = 45.0
+    command_loss: float = 0.0
+    camera_fps: float = 9.0
+    false_positive_rate: float = 0.0
     pose_noise_m: float = 0.0
     sighting_noise_m: float = 0.03
     latency_s: float = 0.13
@@ -127,6 +142,7 @@ class Sim:
 class Logging:
     log_dir: str = "mission/logs"
     level: str = "INFO"
+    status_period_s: float = 5.0
 
     @property
     def log_path(self) -> Path:
@@ -263,14 +279,15 @@ def validate(s: Settings) -> None:
         _check(1 <= port <= 65535, f"network.{name} must be 1-65535 (got {port})")
     _check(len({n.telem_port, n.camera_port}) == 2,
            "network.telem_port and network.camera_port must differ")
-    _positive(n, "network", "connect_timeout_s")
+    _positive(n, "network", "connect_timeout_s", "pose_history_s")
+    _non_negative(n, "network", "pose_lookup_tolerance_s")
 
     f = s.flight
     _positive(f, "flight", "cruise_speed_mps", "hover_radius_m", "hover_timeout_s",
               "arrival_radius_m", "goto_resend_s", "start_repeats",
               "land_repeats", "tick_hz")
     _non_negative(f, "flight", "turn_time_s", "takeoff_wait_s", "hover_settle_s",
-                  "waypoint_timeout_margin_s", "repeat_gap_s")
+                  "waypoint_timeout_margin_s", "repeat_gap_s", "land_settle_s")
     _check(f.tick_hz <= 100, f"flight.tick_hz must be <= 100 (got {f.tick_hz})")
 
     _positive(s.safety, "safety", "stale_timeout_s", "mission_time_limit_s")
@@ -285,15 +302,25 @@ def validate(s: Settings) -> None:
     _positive(t, "tags", "tag_size_m", "max_pose_err", "max_detect_range_m",
               "max_yaw_rate_deg_s", "min_sightings", "confirm_radius_m",
               "outlier_radius_m")
+    _check(t.max_sightings_per_tag >= t.min_sightings,
+           f"tags.max_sightings_per_tag ({t.max_sightings_per_tag}) must be >= "
+           f"tags.min_sightings ({t.min_sightings})")
     _non_negative(t, "tags", "min_decision_margin", "max_hamming",
-                  "expected_down_m", "down_tolerance_m")
+                  "expected_down_m", "down_tolerance_m", "expected_count")
+    _check(t.max_down_m > t.min_down_m,
+           f"tags.max_down_m ({t.max_down_m}) must be > tags.min_down_m ({t.min_down_m})")
     _check(t.outlier_radius_m >= t.confirm_radius_m,
            f"tags.outlier_radius_m ({t.outlier_radius_m}) must be >= "
            f"tags.confirm_radius_m ({t.confirm_radius_m})")
 
     m = s.sim
-    _positive(m, "sim", "speed", "fov_half_angle_deg", "view_max_m")
-    _non_negative(m, "sim", "pose_noise_m", "sighting_noise_m", "latency_s", "view_min_m")
+    _positive(m, "sim", "speed", "fov_half_angle_deg", "view_max_m", "climb_rate_mps",
+              "yaw_rate_deg_s", "camera_fps")
+    _non_negative(m, "sim", "pose_noise_m", "sighting_noise_m", "latency_s", "view_min_m",
+                  "arm_delay_s")
+    for name in ("command_loss", "false_positive_rate"):
+        v = getattr(m, name)
+        _check(0.0 <= v <= 1.0, f"sim.{name} must be between 0 and 1 (got {v})")
     _check(m.view_max_m > m.view_min_m,
            f"sim.view_max_m ({m.view_max_m}) must be > sim.view_min_m ({m.view_min_m})")
     _check(m.fov_half_angle_deg < 90,
@@ -305,6 +332,7 @@ def validate(s: Settings) -> None:
         _check(0 <= tag.id <= 21,
                f"sim.true_tags id {tag.id} is outside the detectable ids 0-21")
 
+    _positive(s.logging, "logging", "status_period_s")
     _check(s.logging.level.upper() in ("DEBUG", "INFO", "WARNING", "ERROR"),
            f"logging.level must be DEBUG, INFO, WARNING or ERROR "
            f"(got {s.logging.level!r})")

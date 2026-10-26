@@ -27,6 +27,8 @@ network:
   cmd_port: 5006         # drone UDP port commands (and camera keepalives) go to
   camera_port: 5009      # laptop UDP port camera JPEG chunks arrive on
   connect_timeout_s: 30.0  # give up if no telemetry within this time (s)
+  pose_history_s: 30.0     # how much timestamped telemetry to keep for pose lookups (s)
+  pose_lookup_tolerance_s: 0.25  # a lookup up to this far past the newest pose returns it (s)
 
 flight:
   cruise_speed_mps: 0.10   # NAV_CRUISE_SPEED_MS in firmware nav_task.h (m/s)
@@ -42,6 +44,8 @@ flight:
   land_repeats: 3          # CMD_LAND copies sent (UDP can drop packets)
   repeat_gap_s: 0.1        # gap between repeated command copies (s)
   tick_hz: 10.0            # state machine tick rate (Hz)
+  stop_when_all_found: true  # return home as soon as tags.expected_count tags are confirmed
+  land_settle_s: 6.0       # after CMD_LAND, wait this long before calling the mission done (s)
 
 safety:
   stale_timeout_s: 3.0         # abort-land if telemetry is older than this (s)
@@ -54,31 +58,47 @@ camera:
   capture_latency_bias_s: 0.0  # extra shift of the estimated capture time, earlier (s)
 
 tags:
-  tag_size_m: 0.12             # printed tag edge length, black border (m); TAG_SIZE in firmware
+  tag_size_m: 0.12             # edge of the BLACK square, not the paper (m); course tags are 120 mm
   min_decision_margin: 55.0    # detector gate, same as firmware (unitless)
   max_hamming: 1               # detector gate, same as firmware (bits)
   max_pose_err: 0.5            # reject poses with reprojection error above this (unitless)
   max_detect_range_m: 1.5      # reject detections farther than this from the camera (m)
   max_yaw_rate_deg_s: 30.0     # reject frames taken while turning faster than this (deg/s)
-  tags_on_floor: true          # true = tags lie flat on the floor
-  expected_down_m: 0.5         # if on floor: expected tag "down" in body frame = flight altitude (m)
-  down_tolerance_m: 0.15       # if on floor: reject if |down - expected_down_m| > this (m)
+  tags_on_floor: false         # true = ALL tags flat on the floor; course has some on walls
+  expected_down_m: 0.5         # floor only: expected tag "down" in body frame = flight altitude (m)
+  down_tolerance_m: 0.15       # floor only: reject if |down - expected_down_m| > this (m)
+  min_down_m: -0.5             # walls too: reject tags more than 0.5 m ABOVE the drone (m, down +)
+  max_down_m: 0.65             # walls too: reject tags more than this BELOW the drone (m); floor = 0.5
+  expected_count: 6            # tags in the area; 0 = unknown (disables early stop)
   min_sightings: 5             # sightings needed (within confirm_radius_m) to confirm a tag
   confirm_radius_m: 0.20       # sightings this close to the median count towards confirmation (m)
   outlier_radius_m: 0.30       # sightings farther than this from the median are ignored (m)
+  max_sightings_per_tag: 400   # keep at most this many (newest) sightings per id (count)
 
 sim:
   speed: 1.0                   # sim clock multiplier (1 = real time)
+  seed: 1                      # random seed, so sim runs are repeatable
+  arm_delay_s: 2.0             # fake CMD_START -> motors spinning (s)
+  climb_rate_mps: 0.2          # fake takeoff / landing vertical speed (m/s)
+  yaw_rate_deg_s: 45.0         # fake rotate-in-place speed (deg/s)
+  command_loss: 0.0            # probability each command datagram is lost (0-1)
+  camera_fps: 9.0              # fake camera frame rate (Hz)
+  false_positive_rate: 0.0     # probability per frame of one wrong-ID sighting (0-1)
   pose_noise_m: 0.0            # std dev of fake telemetry position noise (m)
   sighting_noise_m: 0.03       # std dev of fake tag body-frame position noise (m)
   latency_s: 0.13              # fake camera capture -> laptop delay (s)
   fov_half_angle_deg: 44.0     # fake camera horizontal half field of view (deg)
   view_min_m: 0.1              # fake camera sees floor from this far ahead... (m)
   view_max_m: 1.2              # ...to this far ahead (m)
-  true_tags:                   # fake tags at known positions, PX4 local NED (m)
-    - {id: 3, x: 0.8, y: 0.3}
-    - {id: 7, x: 1.2, y: 0.8}
+  true_tags:                   # fake tags at known positions, PX4 local NED (m); real course: 6 tags
+    - {id: 1, x: 0.35, y: 0.15}
+    - {id: 3, x: 0.80, y: 0.30}
+    - {id: 5, x: 1.30, y: 0.10}
+    - {id: 7, x: 1.20, y: 0.80}
+    - {id: 9, x: 0.60, y: 0.65}
+    - {id: 12, x: 0.25, y: 0.90}
 
 logging:
   log_dir: mission/logs        # one sub-folder per run; relative paths are from cde1302/
   level: INFO                  # console log level: DEBUG, INFO, WARNING, ERROR
+  status_period_s: 5.0         # how often a status line is logged while waiting / in --dry-run (s)

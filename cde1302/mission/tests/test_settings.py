@@ -21,8 +21,9 @@ def test_shipped_config_loads():
     assert s.esp_ip == "192.168.1.202"
     assert s.flight.arrival_radius_m == 0.25
     assert s.flight.cruise_speed_mps == 0.10
-    assert s.tags.tags_on_floor is True
-    assert [t.id for t in s.sim.true_tags] == [3, 7]
+    assert s.tags.tags_on_floor is False          # course: some tags on walls
+    assert s.tags.expected_count == 6
+    assert len(s.sim.true_tags) == 6
     assert s.source == DEFAULT_CONFIG_PATH
     assert s.logging.log_path.is_absolute()
 
