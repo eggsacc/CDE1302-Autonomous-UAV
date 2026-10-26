@@ -537,6 +537,8 @@ bool nav_traj_yaw_command(const uint8_t *packet, size_t length,
     drone_state_t st = mavlink_get_state();
     uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
     bool flying = mission_flying && st.armed && mavlink_position_valid()
+                  /* A recent timestamp alone does not make a usable origin. */
+                  && isfinite(st.x) && isfinite(st.y) && isfinite(st.z)
                   && st.custom_main_mode == PX4_MAIN_MODE_OFFBOARD
                   && now_ms - st.last_att_ms <= 300
                   && now_ms - st.last_hb_ms <= 1500;

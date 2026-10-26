@@ -110,6 +110,7 @@ All changes are under `cde1302/`:
 | `laptop/analyze_yaw_experiments.py` | Local ULog tracking analysis and plot export |
 | `tools/prepare_yaw_drone2.py` | Generate isolated Drone-2 config and verify generated build header |
 | `laptop/tests/test_tangent_yaw.py`, `test_yaw_analysis.py`, `yaw_core_wrapper.c` | Offline acceptance, actual C core, fake transport and synthetic analysis tests |
+| `laptop/tests/test_firmware_pipeline.py`, `firmware_host/` | Compile actual navigation and MAVLink code with hardware stubs; check emitted UART bytes and safety gates |
 | `laptop/requirements-yaw.txt`, `.gitignore`, this README, `TANGENT_YAW_TECHNICAL_REPORT.md` | Reproduction, privacy of local logs, handoff and readiness |
 
 Original `trajectory/ellipse_min_snap_traj.csv`, original `sdkconfig`, Simulink
@@ -147,13 +148,28 @@ The following is an offline regeneration command, not a flight command:
 
 ```powershell
 .\.venv\Scripts\python.exe laptop\generate_tangent_yaw.py --plot logs\reference_audit.png
-.\.venv\Scripts\python.exe -m pytest laptop\tests\test_traj.py laptop\tests\test_tangent_yaw.py laptop\tests\test_yaw_analysis.py -q
+.\.venv\Scripts\python.exe -m pytest laptop\tests\test_traj.py laptop\tests\test_tangent_yaw.py laptop\tests\test_firmware_pipeline.py laptop\tests\test_yaw_analysis.py -q
 ```
 
 Native C tests need GCC/Clang or Zig. On Windows, optionally set `$env:ZIG` to a
 Zig executable; tests invoke `zig cc`. With no supported C compiler those tests
 are explicitly skipped. Install `laptop/requirements.txt` as well for the full
 camera/AprilTag suite; those packages are not needed to upload trajectories.
+
+The firmware pipeline test compiles the actual `nav_task.c`, `mavlink_task.c`
+and `traj_yaw.c` using test-only ESP-IDF stubs. Simulated PX4 telemetry enters
+the real parser; outgoing UART bytes are decoded independently and checked for
+MAVLink CRC, target, NED frame, XYZ, velocity, yaw and field mask. It verifies
+all 681 original fixed-yaw points, a separate feasible synthetic tangent arc,
+wrap crossing, final hold, duplicate START, telemetry loss, mode takeover,
+nonfinite start-position rejection and the existing 300 ms setpoint watchdog.
+It also sends the strict original ellipse directly to the C code and confirms
+that firmware rejects it at 1 rad/s even without Python validation. The synthetic
+arc is a temporary test fixture and never replaces the Lab 5 trajectory.
+
+These tests have no real serial/network access or flight dynamics. They do not
+verify ESP-IDF linking, PSRAM, FreeRTOS scheduling, Wi-Fi transport or PX4's
+physical response; those remain deployment checks on the teammate's setup.
 
 Ubuntu Bash equivalent (development/build only; use the teammate's normal native
 flight OS for networking rather than assuming WSL forwards UDP correctly):
@@ -167,7 +183,7 @@ python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r laptop/requirements-yaw.txt
 python laptop/send_trajectory.py --drone-id 2 --trajectory trajectory/ellipse_min_snap_traj.csv --dry-run
-python -m pytest laptop/tests/test_traj.py laptop/tests/test_tangent_yaw.py laptop/tests/test_yaw_analysis.py -q
+python -m pytest laptop/tests/test_traj.py laptop/tests/test_tangent_yaw.py laptop/tests/test_firmware_pipeline.py laptop/tests/test_yaw_analysis.py -q
 ```
 
 ## Protocol, storage and compatibility
@@ -403,12 +419,13 @@ its committed defaults are Drone 22. Do not reset or overwrite team work.
 
 - **Implemented:** both modes, separate strict reference, all required software
   hops, local evidence collection, offline ULog analysis, deployment instructions.
-- **Tested:** 102 passed, 47 skipped in the full laptop suite; actual portable C
-  protocol code compiled and exercised. Tests include Python-to-C ACK flow over
-  fake transport; none is a real drone test. The 47 skipped tests are the existing
+- **Tested:** 120 passed, 47 skipped in the full laptop suite; actual protocol,
+  navigation and MAVLink C code compiled and exercised. Tests include Python-to-C
+  ACK flow and independently decoded MAVLink UART bytes over fake hardware;
+  none is a real drone test. The 47 skipped tests are the existing
   AprilTag host compiler tests. Fixed dry-run passes; strict ellipse rejection is
   required and verified. Source position/time fields match verbatim.
-- **Built:** portable C core for host tests only. Full ESP32 firmware not built:
+- **Built:** protocol/navigation/MAVLink code for host tests only. Full ESP32 firmware not built:
   pinned ESP-IDF/toolchain unavailable. Hardware/network mapping not verified.
 - **Flight-validated:** no. No drone was flashed, armed or flown. The strict
   tangent ellipse is mathematically incompatible with the configured yaw limits.

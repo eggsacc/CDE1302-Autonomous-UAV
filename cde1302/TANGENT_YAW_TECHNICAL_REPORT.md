@@ -27,9 +27,14 @@ neither commands an automatic turn.
 
 | Check actually executed | Result |
 |---|---|
-| Full laptop regression suite | 102 passed, 47 skipped |
+| Full laptop regression suite | 120 passed, 47 skipped |
 | Native compilation/execution of `main/traj_yaw.c` via Zig C compiler | Passed |
 | Python uploader -> real C upload/ACK core with fake mission/network transport | Passed |
+| CSV/Python -> actual navigation -> actual MAVLink UART bytes, simulated hardware | Passed; independent CRC/field decoding, wrap, interpolation, final hold |
+| All 681 original fixed-yaw points through real navigation/MAVLink | Passed; original 34 s and constant starting heading |
+| Actual navigation start/cancel gates, duplicate START, MAVLink 300 ms watchdog | Passed with simulated telemetry through real parser |
+| Nonfinite PX4 origin at tangent START | Three failing regression cases reproduced, guard fixed, now pass |
+| Strict original ellipse directly uploaded to actual navigation/C core | Rejected at 1 rad/s, independently of Python checks |
 | Legacy packet layout and CSV resampling tests | Passed |
 | Every original time/XYZ field vs new strict CSV | 3,401 rows match verbatim |
 | Default uploaded fixed/tangent XYZ reference | Same 681 points and 34 s before yaw-limit rejection |
@@ -49,6 +54,15 @@ The 47 skips are existing AprilTag host tests requiring their supported GCC setu
 The separate yaw C tests did run. A pre-existing optional telemetry parser/test
 mismatch was resolved by supporting an additive status trailer; legacy telemetry
 still decodes and missing state stays unknown. No PX4 firmware changes were made.
+
+The additional pipeline harness compiles the production navigation and MAVLink
+translation units with their real application/protocol headers. Only ESP-IDF,
+UART, sensor and network boundaries are stubbed. It caught a missing finite-XYZ
+check at tangent START: a fresh timestamp could otherwise let NaN/infinite PX4
+position become the trajectory origin. The start gate now rejects that state.
+Normal fixed-yaw behavior, yaw limits and the MAVLink implementation are unchanged.
+The host tests do not run an RTOS or a PX4 controller and do not establish actual
+Wi-Fi/UART delivery, ESP-IDF linkage, target memory behavior or flight performance.
 
 ## Integration details and remaining work
 
