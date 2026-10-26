@@ -116,12 +116,31 @@ class TagFilter:
                         decision_margin=det.decision_margin), None
 
 
+@dataclass(frozen=True)
+class TagMark:
+    """One detection as drawn on the camera panel."""
+    tag_id: int
+    corners: tuple[tuple[float, float], ...]   # 4 image pixels, AprilTag convention
+    reason: Optional[str] = None               # None = accepted, else why rejected
+
+
+@dataclass(frozen=True)
+class CameraView:
+    """The latest camera frame and what the detector made of it."""
+    gray: np.ndarray                          # (240, 320) uint8; never modified
+    t_capture: float                          # estimated capture time (mission clock)
+    marks: tuple[TagMark, ...] = ()
+    age_ms: Optional[int] = None              # capture -> sent, measured on the drone
+
+
 def process_gray(gray: np.ndarray, detector: Detector, tag_filter: TagFilter,
-                 poses: PoseSource, t_capture: float, t_detect: float
+                 poses: PoseSource, t_capture: float, t_detect: float,
+                 marks: Optional[list[TagMark]] = None
                  ) -> tuple[list[Sighting], list[tuple[int, str]]]:
     """Detect tags in one grayscale frame.
 
     Returns (accepted sightings, [(tag_id, reason), ...] for rejected ones).
+    If `marks` is given, a TagMark per detection is appended to it.
     """
     accepted, rejected = [], []
     for det in detector.detect(gray):
@@ -130,6 +149,8 @@ def process_gray(gray: np.ndarray, detector: Detector, tag_filter: TagFilter,
             accepted.append(s)
         else:
             rejected.append((det.id, reason))
+        if marks is not None:
+            marks.append(TagMark(det.id, tuple(det.corners), reason))
     return accepted, rejected
 
 
@@ -189,6 +210,7 @@ class TagPipeline:
         self._keepalive = build_camera_stream_command(True, cam.fps, cam.quality)
         self._stats = PipelineStats()
         self._stats_lock = threading.Lock()
+        self._view: Optional[CameraView] = None
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._rx: Optional[socket.socket] = None
@@ -259,6 +281,11 @@ class TagPipeline:
         with self._stats_lock:
             return self._stats.copy()
 
+    def latest_view(self) -> Optional[CameraView]:
+        """The newest decoded frame with its tag outlines, or None before the first."""
+        with self._stats_lock:
+            return self._view
+
     # -- thread -------------------------------------------------------------
 
     def _send_keepalive(self, ip: str) -> None:
@@ -309,9 +336,11 @@ class TagPipeline:
                 self._stats.bad_jpeg += 1
             return
         t_cap = capture_time(first_rx, age_ms, self.settings.camera.capture_latency_bias_s)
+        marks: list[TagMark] = []
         accepted, rejected = process_gray(gray, self._detector, self._filter,
-                                          self._poses, t_cap, self._clock())
+                                          self._poses, t_cap, self._clock(), marks)
         with self._stats_lock:
+            self._view = CameraView(gray, t_cap, tuple(marks), age_ms)
             st = self._stats
             st.frames += 1
             st.detections += len(accepted) + len(rejected)

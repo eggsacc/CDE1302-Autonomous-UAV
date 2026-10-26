@@ -102,3 +102,11 @@ logging:
   log_dir: mission/logs        # one sub-folder per run; relative paths are from cde1302/
   level: INFO                  # console log level: DEBUG, INFO, WARNING, ERROR
   status_period_s: 5.0         # how often a status line is logged while waiting / in --dry-run (s)
+
+live_map:                      # `python mission/mission.py --map ...`
+  redraw_hz: 5.0               # how often the map is redrawn (Hz); the mission still ticks at flight.tick_hz
+  arrow_m: 0.25                # length of the drone heading arrow on the map (m)
+  view_margin_m: 0.4           # empty space around the area / path / tags (m)
+  save_png: true               # save the final map as map.png in the run's log folder
+  show_camera: true            # camera panel with tag outlines next to the map
+  camera_stale_s: 2.0          # show NO VIDEO when the newest frame is older than this (s)

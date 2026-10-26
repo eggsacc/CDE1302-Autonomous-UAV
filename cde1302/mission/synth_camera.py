@@ -3,14 +3,17 @@ Synthetic drone camera frames with tag16h5 tags lying on the floor.
 
 Ray-casts every pixel of the drone's 320x240 camera (firmware intrinsics,
 45 deg tilt and mount offset from apriltag_host.py) onto the floor plane,
-then looks up the tag pattern there, so a test knows exactly where each tag
-is in PX4 local NED and can check the whole detect -> body -> NED chain.
+then looks up the tag pattern there.  The tests use it to check the whole
+detect -> body -> NED chain against known tag positions; sim.py uses it for
+the camera panel of the live map.
 
     gray = render_view([FloorTag(3, 0.8, 0.3)], drone=(0.2, 0.3, 0.0))
+    corners = floor_tag_corners_px(FloorTag(3, 0.8, 0.3), drone=(0.2, 0.3, 0.0))
 """
 
 from __future__ import annotations
 
+import functools
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,17 +69,14 @@ class FloorTag:
     size: float = TAG_SIZE_M  # black-border edge length (m)
 
 
-def render_view(tags: list[FloorTag], drone: tuple[float, float, float],
-                altitude: float = 0.5, width: int = 320, height: int = 240,
-                supersample: int = 4, floor_level: int = 200, black_level: int = 30,
-                noise: float = 2.0, jpeg_quality: int | None = 60,
-                seed: int = 0) -> np.ndarray:
-    """Grayscale uint8 image the drone camera would see.
+@functools.lru_cache(maxsize=16)
+def _floor_body(altitude: float, width: int, height: int, supersample: int
+                ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Where each (sub)pixel's ray hits the floor, in the body frame.
 
-    Args:
-        drone: (north, east, heading rad) in PX4 local NED.
-        altitude: drone body origin height above the floor (m).
-        jpeg_quality: round-trip through JPEG like the real stream (None = off).
+    Depends only on altitude and image size, so it is cached: in flight the
+    altitude is constant and rendering then only rotates these points.
+    Returns (hits, forward, right); arrays are read-only.
     """
     k = FIRMWARE_INTRINSICS
     off = (np.arange(supersample) + 0.5) / supersample
@@ -92,6 +92,24 @@ def render_view(tags: list[FloorTag], drone: tuple[float, float, float],
     hits = db[..., 2] > 1e-6
     f = o[0] + s * db[..., 0]
     r = o[1] + s * db[..., 1]
+    for a in (hits, f, r):
+        a.setflags(write=False)
+    return hits, f, r
+
+
+def render_view(tags: list[FloorTag], drone: tuple[float, float, float],
+                altitude: float = 0.5, width: int = 320, height: int = 240,
+                supersample: int = 4, floor_level: int = 200, black_level: int = 30,
+                noise: float = 2.0, jpeg_quality: int | None = 60,
+                seed: int = 0) -> np.ndarray:
+    """Grayscale uint8 image the drone camera would see.
+
+    Args:
+        drone: (north, east, heading rad) in PX4 local NED.
+        altitude: drone body origin height above the floor (m).
+        jpeg_quality: round-trip through JPEG like the real stream (None = off).
+    """
+    hits, f, r = _floor_body(float(altitude), width, height, supersample)
     x, y, h = drone
     c, sn = math.cos(h), math.sin(h)
     north = x + f * c - r * sn
@@ -125,3 +143,29 @@ def jpeg_bytes(gray: np.ndarray, quality: int = 60) -> bytes:
     ok, buf = cv2.imencode(".jpg", gray, [cv2.IMWRITE_JPEG_QUALITY, quality])
     assert ok
     return buf.tobytes()
+
+
+def floor_tag_corners_px(tag: FloorTag, drone: tuple[float, float, float],
+                         altitude: float = 0.5
+                         ) -> tuple[tuple[float, float], ...] | None:
+    """Image pixels (AprilTag convention) of a floor tag's 4 black-border corners.
+
+    Returns None if any corner is behind the camera.
+    """
+    k = FIRMWARE_INTRINSICS
+    x, y, h = drone
+    c, s = math.cos(h), math.sin(h)
+    cy, sy = math.cos(tag.yaw), math.sin(tag.yaw)
+    R = np.asarray(R_BODY_CAM)
+    out = []
+    half = tag.size / 2.0
+    for a, b in ((half, -half), (half, half), (-half, half), (-half, -half)):
+        north = tag.north + a * cy - b * sy            # tag frame -> NED
+        east = tag.east + a * sy + b * cy
+        dn, de = north - x, east - y
+        body = np.array([dn * c + de * s, -dn * s + de * c, altitude])
+        t = R.T @ (body - np.asarray(CAM_POS_M))
+        if t[2] <= 1e-6:
+            return None
+        out.append((float(k.fx * t[0] / t[2] + k.cx), float(k.fy * t[1] / t[2] + k.cy)))
+    return tuple(out)

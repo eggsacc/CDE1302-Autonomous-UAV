@@ -4,6 +4,7 @@ import dataclasses
 import inspect
 import math
 
+import numpy as np
 import pytest
 
 from drone_link import DroneLink
@@ -280,3 +281,37 @@ def test_threaded_source_delivers(settings, clock):
         time.sleep(0.01)
     cam.stop()
     assert got and not cam.running
+
+
+def test_sim_camera_view_for_the_live_map(settings, clock):
+    s = one_tag(settings, 0.6, 0.0)
+    d = airborne(s, clock)
+    cam = SimTagSource(s, d, lambda _: None, clock=clock, threaded=False)
+    assert cam.latest_view() is None                      # no frame yet
+    cam.start()
+    run(clock, d, 1.0, cam=cam)
+    view = cam.latest_view()
+    assert view.gray.shape == (240, 320) and view.gray.dtype == np.uint8
+    assert [(m.tag_id, m.reason) for m in view.marks] == [(4, None)]
+    u = [c[0] for c in view.marks[0].corners]
+    v = [c[1] for c in view.marks[0].corners]
+    assert 100 < sum(u) / 4 < 220 and 0 < min(v) and max(v) < 240   # straight ahead
+    # The black tag is really drawn under its outline.
+    cu, cv = int(sum(u) / 4), int(sum(v) / 4)
+    assert view.gray[cv - 4:cv + 5, cu - 4:cu + 5].min() < 100
+    assert cam.latest_view() is view                      # rendered once per frame
+
+
+def test_sim_camera_view_marks_rejections(settings, clock):
+    s = one_tag(settings, 0.0, -0.6, yaw_rate_deg_s=90.0)
+    d = airborne(s, clock)
+    cam = SimTagSource(s, d, lambda _: None, clock=clock, threaded=False)
+    cam.start()
+    d.send_goto(-1.0, 0.0)                                # turn fast past the tag
+    reasons = set()
+    for _ in range(15):
+        run(clock, d, 0.1, cam=cam)
+        view = cam.latest_view()
+        if view is not None:
+            reasons |= {m.reason for m in view.marks}
+    assert R_YAW_RATE in reasons

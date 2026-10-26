@@ -9,6 +9,7 @@ Run from the cde1302/ folder:
     python mission/mission.py --auto              # real flight, no pause after hover
     python mission/mission.py                     # real flight, type `start` after hover
     python mission/mission.py --config other.yaml
+    add --map to any of these for a live map window (live_map.py)
 
 Operator commands (type + Enter, any time):
     takeoff   arm, take off and hover            (READY)
@@ -652,6 +653,8 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
                       help="real drone telemetry + camera, NEVER send flight commands")
     ap.add_argument("--auto", action="store_true",
                     help="start the search as soon as hover is confirmed (no `start`)")
+    ap.add_argument("--map", action="store_true",
+                    help="show a live map of the drone and the tags (live_map.py)")
     return ap.parse_args(argv)
 
 
@@ -670,7 +673,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     log.info("Run folder: %s", mission.log.folder)
     start_operator_input(mission)
     speed = settings.sim.speed if args.sim else 1.0
-    return run(mission, period_s=1.0 / (settings.flight.tick_hz * speed))
+    period_s = 1.0 / (settings.flight.tick_hz * speed)
+    if args.map:
+        from live_map import run_with_map       # imports matplotlib only when asked
+        return run_with_map(mission, period_s)
+    return run(mission, period_s=period_s)
 
 
 if __name__ == "__main__":

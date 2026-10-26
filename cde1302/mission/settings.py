@@ -152,6 +152,16 @@ class Logging:
 
 
 @dataclass(frozen=True)
+class LiveMap:
+    redraw_hz: float = 5.0
+    arrow_m: float = 0.25
+    view_margin_m: float = 0.4
+    save_png: bool = True
+    show_camera: bool = True
+    camera_stale_s: float = 2.0
+
+
+@dataclass(frozen=True)
 class Settings:
     drone_id: int
     area: Area
@@ -163,7 +173,8 @@ class Settings:
     tags: Tags = field(default_factory=Tags)
     sim: Sim = field(default_factory=Sim)
     logging: Logging = field(default_factory=Logging)
-    source: Path | None = None                 # file it was loaded from
+    live_map: LiveMap = field(default_factory=LiveMap)
+    source: Path | None = None                # file it was loaded from
     raw: dict = field(default_factory=dict, compare=False, repr=False)
 
     @property
@@ -333,6 +344,8 @@ def validate(s: Settings) -> None:
                f"sim.true_tags id {tag.id} is outside the detectable ids 0-21")
 
     _positive(s.logging, "logging", "status_period_s")
+    _positive(s.live_map, "live_map", "redraw_hz", "arrow_m", "camera_stale_s")
+    _non_negative(s.live_map, "live_map", "view_margin_m")
     _check(s.logging.level.upper() in ("DEBUG", "INFO", "WARNING", "ERROR"),
            f"logging.level must be DEBUG, INFO, WARNING or ERROR "
            f"(got {s.logging.level!r})")

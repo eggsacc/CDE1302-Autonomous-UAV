@@ -22,7 +22,7 @@ from settings import load_settings
 from tag_pipeline import (R_HEIGHT, R_GATE, R_NO_DRONE, R_NO_POSE, R_POSE_ERR,
                           R_RANGE, R_YAW_RATE, TagFilter, TagPipeline,
                           capture_time, process_gray)
-from tag_render import FloorTag, jpeg_bytes, render_view
+from synth_camera import FloorTag, floor_tag_corners_px, jpeg_bytes, render_view
 
 TOL_M = 0.03          # "within a few cm"
 
@@ -120,6 +120,24 @@ def test_wrong_tag_size_is_caught_by_the_floor_check(detector, settings):
     gray = render_view([FloorTag(3, n, e, 0.2, size=0.09)], drone)
     got, rejected = process_gray(gray, detector, floor_only, StillPoses(*drone), 0, 0)
     assert got == [] and rejected == [(3, R_HEIGHT)]
+
+
+def test_marks_outline_every_detection(detector, settings):
+    # One accepted tag and one rejected (too high off the floor in floor mode).
+    floor_only = TagFilter(dataclasses.replace(settings.tags, tags_on_floor=True))
+    drone = (0.0, 0.0, 0.0)
+    good = tag_ahead(drone, 0.6, -0.2, tag_id=3)
+    n, e = body_to_ned(0.6, 0.25, *drone)
+    small = FloorTag(9, n, e, 0.3, size=0.09)        # looks too far -> height reject
+    marks = []
+    process_gray(render_view([good, small], drone), detector, floor_only,
+                 StillPoses(*drone), 0, 0, marks)
+    by_id = {m.tag_id: m for m in marks}
+    assert by_id[3].reason is None and by_id[9].reason == R_HEIGHT
+    # Detected corners match the projection the sim uses for its outlines.
+    want = floor_tag_corners_px(good, drone)
+    for c in by_id[3].corners:
+        assert min(math.dist(c, w) for w in want) < 1.5
 
 
 def test_empty_floor_gives_nothing(detector, tag_filter):
@@ -228,6 +246,7 @@ def test_pipeline_thread_end_to_end(settings):
     got = []
     pipe = TagPipeline(s, poses, esp_ip=lambda: "127.0.0.1", on_sighting=got.append,
                        bind_host="127.0.0.1")
+    assert pipe.latest_view() is None
     pipe.start()
     try:
         keepalive = esp.recv(64)                             # it asks for video
@@ -246,6 +265,10 @@ def test_pipeline_thread_end_to_end(settings):
         assert now - 1.0 < got[0].t_capture < now           # first_rx - 0.12 s
         st = pipe.stats()
         assert st.frames == 2 and st.accepted == 2 and st.last_age_ms == 120
+        view = pipe.latest_view()                            # for the camera panel
+        assert view.gray.shape == (240, 320) and view.age_ms == 120
+        assert [(m.tag_id, m.reason) for m in view.marks] == [(7, None)]
+        assert all(0 <= u <= 320 and 0 <= v <= 240 for u, v in view.marks[0].corners)
     finally:
         pipe.stop()
     # stop() tells the drone to stop streaming (after any queued keepalives)

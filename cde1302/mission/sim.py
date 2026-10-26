@@ -52,10 +52,11 @@ from apriltag_host import CAM_POS_M, R_BODY_CAM, Detection
 from protocol import NAV_ARRIVED, NAV_FLYING, NAV_IDLE, NAV_ROTATING
 
 from drone_link import Pose, PoseBuffer
-from geometry import angle_diff, ned_to_body, wrap_angle
+from geometry import angle_diff, body_to_ned, ned_to_body, wrap_angle
 from settings import Settings
 from sighting import Sighting
-from tag_pipeline import PipelineStats, TagFilter
+from synth_camera import FloorTag, floor_tag_corners_px, render_view
+from tag_pipeline import CameraView, PipelineStats, TagFilter, TagMark
 
 log = logging.getLogger(__name__)
 
@@ -386,6 +387,8 @@ class SimTagSource:
         self._period = 1.0 / settings.sim.camera_fps
         self._next_capture: Optional[float] = None
         self._pending: list[tuple[float, Sighting]] = []   # (deliver_t, sighting)
+        self._last_frame: Optional[tuple] = None             # for latest_view()
+        self._view_cache: Optional[CameraView] = None
         self._stats = PipelineStats()
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -466,20 +469,23 @@ class SimTagSource:
         if truth is None:
             return
         x, y, heading, alt = truth
+        marks: list[tuple[int, float, float, Optional[str]]] = []   # id, north, east, reason
+        with self._lock:
+            self._last_frame = (tc, truth, marks)        # filled in below
         if alt <= AIRBORNE_M:
             return
-        seen: list[tuple[int, float, float]] = []
+        seen: list[tuple[int, float, float, float, float]] = []    # id, f, r, north, east
         for tag in sim.true_tags:
             f, r = ned_to_body(tag.x, tag.y, x, y, heading)
             if self.in_view(f, r):
-                seen.append((tag.id, f, r))
+                seen.append((tag.id, f, r, tag.x, tag.y))
         if self._rng.random() < sim.false_positive_rate:
             f = self._rng.uniform(sim.view_min_m, sim.view_max_m)
             r = f * math.tan(math.radians(self._rng.uniform(-1, 1) * sim.fov_half_angle_deg))
-            seen.append((self._rng.randrange(22), f, r))
+            seen.append((self._rng.randrange(22), f, r, *body_to_ned(f, r, x, y, heading)))
         n = sim.sighting_noise_m
         t_detect = tc + sim.latency_s
-        for tag_id, f, r in seen:
+        for tag_id, f, r, north, east in seen:
             body = (f + self._rng.gauss(0, n), r + self._rng.gauss(0, n),
                     alt + self._rng.gauss(0, n))
             s, reason = self._filter.evaluate(self._detection(tag_id, body), tc,
@@ -490,5 +496,32 @@ class SimTagSource:
                     self._stats.rejected[reason] += 1
                 else:
                     self._stats.accepted += 1
+                marks.append((tag_id, north, east, reason))
             if s is not None:
                 self._pending.append((t_detect, s))
+
+    def latest_view(self) -> Optional[CameraView]:
+        """A rendered image of the newest frame, with tag outlines.
+
+        Rendered only when asked (the live map), and once per frame.
+        """
+        with self._lock:
+            last = self._last_frame
+            marks = list(last[2]) if last else []
+        if last is None:
+            return None
+        tc, (x, y, heading, alt), _ = last
+        if self._view_cache is not None and self._view_cache.t_capture == tc:
+            return self._view_cache
+        drone = (x, y, heading)
+        floor = [FloorTag(t.id, t.x, t.y) for t in self.settings.sim.true_tags]
+        gray = render_view(floor, drone, altitude=round(max(alt, 0.02), 2), supersample=1,
+                           jpeg_quality=None, seed=int(tc * 1000) % 100000)
+        drawn = []
+        for tag_id, north, east, reason in marks:
+            corners = floor_tag_corners_px(FloorTag(tag_id, north, east), drone, alt)
+            if corners is not None:
+                drawn.append(TagMark(tag_id, corners, reason))
+        self._view_cache = CameraView(gray, tc, tuple(drawn),
+                                      int(self.settings.sim.latency_s * 1000))
+        return self._view_cache
