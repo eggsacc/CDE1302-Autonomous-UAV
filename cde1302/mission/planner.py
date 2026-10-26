@@ -97,10 +97,10 @@ def main() -> None:
     for i, (x, y) in enumerate(wps, 1):
         print(f"  {i:2d}: x={x:5.2f}  y={y:5.2f}")
 
-    est = cfg.get("estimate", {})
+    flight = cfg.get("flight", {})
     length = path_length(wps)
-    fly_s = length / est.get("cruise_speed", 0.10)
-    turn_s = len(wps) * est.get("turn_time_s", 4.0)
+    fly_s = length / flight.get("cruise_speed_mps", 0.10)
+    turn_s = len(wps) * flight.get("turn_time_s", 4.0)
     print(f"Path length {length:.1f} m -> about {fly_s:.0f} s flying "
           f"+ {turn_s:.0f} s turning = {(fly_s + turn_s) / 60:.1f} min "
           "(excludes takeoff and landing)")

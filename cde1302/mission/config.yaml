@@ -1,22 +1,84 @@
 # Mini project mission settings.
-# Coordinates are PX4 local NED in metres, origin = takeoff point:
-#   x = North (forward if the drone starts facing North), y = East (right).
+# Coordinates are PX4 local NED in metres: x = North, y = East.
+# The origin is where PX4's EKF2 started (normally where the drone sat at
+# power-up, i.e. the takeoff spot). mission.py records the pose at CMD_START as
+# "home", logs it, and returns there before landing. Tag positions are
+# reported in this same raw PX4 frame, so they line up with the .ulg log.
+#
+# Every number the mission uses lives here. mission/settings.py loads and
+# validates this file and rejects unknown keys, so a typo fails loudly.
 
-drone_id: 2
+drone_id: 2              # ESP32 CONFIG_DRONE_ID; drone IP = 192.168.1.(200 + id)
 
 # Search area. PLACEHOLDER numbers: replace with the real area on demo day.
 area:
-  x_min: 0.0
-  x_max: 1.5
-  y_min: 0.0
-  y_max: 1.0
-  margin: 0.2          # keep waypoints this far inside the edges (m)
+  x_min: 0.0             # m
+  x_max: 1.5             # m
+  y_min: 0.0             # m
+  y_max: 1.0             # m
+  margin: 0.2            # keep waypoints this far inside the edges (m)
 
 sweep:
-  lane_spacing: 0.6    # distance between lanes (m); measure camera swath in the lab
-  lanes_along: x       # "x" = lanes run North-South, "y" = lanes run East-West
+  lane_spacing: 0.6      # max distance between lanes (m); measure camera swath in the lab
+  lanes_along: x         # "x" = lanes run North-South, "y" = lanes run East-West
 
-# Used only for the time estimate printed by planner.py.
-estimate:
-  cruise_speed: 0.10   # NAV_CRUISE_SPEED_MS in firmware nav_task.h (m/s)
-  turn_time_s: 4.0     # guess for rotate-in-place at each waypoint; measure it
+network:
+  telem_port: 5005       # laptop UDP port telemetry arrives on
+  cmd_port: 5006         # drone UDP port commands (and camera keepalives) go to
+  camera_port: 5009      # laptop UDP port camera JPEG chunks arrive on
+  connect_timeout_s: 30.0  # give up if no telemetry within this time (s)
+
+flight:
+  cruise_speed_mps: 0.10   # NAV_CRUISE_SPEED_MS in firmware nav_task.h (m/s)
+  turn_time_s: 4.0         # allowance for rotate-in-place at each waypoint (s); measure it
+  takeoff_wait_s: 8.0      # minimum wait after CMD_START before probing for hover (s)
+  hover_radius_m: 0.10     # xy must stay within this radius to count as hovering (m)
+  hover_settle_s: 2.0      # ...for at least this long (s)
+  hover_timeout_s: 20.0    # abort-land if hover not confirmed this long after takeoff_wait_s (s)
+  arrival_radius_m: 0.25   # waypoint reached when horizontal distance <= this (m)
+  waypoint_timeout_margin_s: 10.0  # extra time per leg on top of distance/speed + turn (s)
+  goto_resend_s: 2.0       # resend GOTO if the drone hasn't started moving after this (s)
+  start_repeats: 3         # CMD_START copies sent (extras are ignored by firmware)
+  land_repeats: 3          # CMD_LAND copies sent (UDP can drop packets)
+  repeat_gap_s: 0.1        # gap between repeated command copies (s)
+  tick_hz: 10.0            # state machine tick rate (Hz)
+
+safety:
+  stale_timeout_s: 3.0         # abort-land if telemetry is older than this (s)
+  geofence_margin_m: 0.5       # abort-land if outside area (+ home) grown by this (m)
+  mission_time_limit_s: 600.0  # after this, stop searching, return and land (s)
+
+camera:
+  fps: 0                       # stream rate 1-15 fps; 0 = firmware default (10)
+  quality: 0                   # JPEG quality 10-90; 0 = firmware default (60)
+  capture_latency_bias_s: 0.0  # extra shift of the estimated capture time, earlier (s)
+
+tags:
+  tag_size_m: 0.12             # printed tag edge length, black border (m); TAG_SIZE in firmware
+  min_decision_margin: 55.0    # detector gate, same as firmware (unitless)
+  max_hamming: 1               # detector gate, same as firmware (bits)
+  max_pose_err: 0.5            # reject poses with reprojection error above this (unitless)
+  max_detect_range_m: 1.5      # reject detections farther than this from the camera (m)
+  max_yaw_rate_deg_s: 30.0     # reject frames taken while turning faster than this (deg/s)
+  tags_on_floor: true          # true = tags lie flat on the floor
+  expected_down_m: 0.5         # if on floor: expected tag "down" in body frame = flight altitude (m)
+  down_tolerance_m: 0.15       # if on floor: reject if |down - expected_down_m| > this (m)
+  min_sightings: 5             # sightings needed (within confirm_radius_m) to confirm a tag
+  confirm_radius_m: 0.20       # sightings this close to the median count towards confirmation (m)
+  outlier_radius_m: 0.30       # sightings farther than this from the median are ignored (m)
+
+sim:
+  speed: 1.0                   # sim clock multiplier (1 = real time)
+  pose_noise_m: 0.0            # std dev of fake telemetry position noise (m)
+  sighting_noise_m: 0.03       # std dev of fake tag body-frame position noise (m)
+  latency_s: 0.13              # fake camera capture -> laptop delay (s)
+  fov_half_angle_deg: 44.0     # fake camera horizontal half field of view (deg)
+  view_min_m: 0.1              # fake camera sees floor from this far ahead... (m)
+  view_max_m: 1.2              # ...to this far ahead (m)
+  true_tags:                   # fake tags at known positions, PX4 local NED (m)
+    - {id: 3, x: 0.8, y: 0.3}
+    - {id: 7, x: 1.2, y: 0.8}
+
+logging:
+  log_dir: mission/logs        # one sub-folder per run; relative paths are from cde1302/
+  level: INFO                  # console log level: DEBUG, INFO, WARNING, ERROR
