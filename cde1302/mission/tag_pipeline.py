@@ -23,7 +23,8 @@ Per detection, rejected (and counted by reason) if it:
     [min_down_m, max_down_m]),
     has no drone pose at capture time, or was taken while turning faster
     than max_yaw_rate_deg_s.
-Survivors are placed in NED with geometry.body_to_ned(t_body, drone pose).
+Survivors are placed in NED with geometry.body_to_ned(body, drone pose), where
+body uses tags.camera_pitch_deg (camera_mount.py), not Detection.t_body's 45 deg.
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ from apriltag_host import Detection, Detector, passes_gate
 from camera_stream import KEEPALIVE_S, FrameAssembler, drain_socket
 from protocol import build_camera_stream_command
 
+from camera_mount import camera_to_body
 from drone_link import Pose
 from geometry import body_to_ned
 from settings import Settings, Tags
@@ -91,9 +93,9 @@ class TagFilter:
         c = self.cfg
         if not passes_gate(det, c.min_decision_margin, c.max_hamming):
             return None, R_GATE
-        body = det.t_body
-        if body is None or det.pose_err is None:
+        if det.t is None or det.pose_err is None:
             return None, R_NO_POSE
+        body = camera_to_body(det.t, c.camera_pitch_deg)
         if det.pose_err > c.max_pose_err:
             return None, R_POSE_ERR
         if det.range_m > c.max_detect_range_m:

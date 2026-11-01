@@ -25,6 +25,8 @@ MISSION_DIR = Path(__file__).resolve().parent
 REPO_DIR = MISSION_DIR.parent              # cde1302/
 DEFAULT_CONFIG_PATH = MISSION_DIR / "config.yaml"
 
+FIRMWARE_SPEED_CAP_MPS = 0.50    # MAV_CMD_SPEED_CAP_MS in main/mavlink_task.h
+
 
 class ConfigError(ValueError):
     """config.yaml is missing a key, has an unknown key, or a bad value."""
@@ -47,6 +49,9 @@ class Area:
 class Sweep:
     lane_spacing: float
     lanes_along: str = "x"
+    camera_offset_m: float = 0.6
+    start_at_home: bool = False
+    start_in_middle: bool = False
 
 
 @dataclass(frozen=True)
@@ -61,7 +66,14 @@ class Network:
 
 @dataclass(frozen=True)
 class Flight:
+    nav_mode: str = "trajectory"
     cruise_speed_mps: float = 0.10
+    traj_dt_s: float = 0.05
+    traj_max_speed_mps: float = 0.30
+    traj_upload_gap_s: float = 0.025
+    traj_start_timeout_s: float = 1.5
+    traj_start_attempts: int = 5
+    traj_end_margin_s: float = 10.0
     turn_time_s: float = 4.0
     takeoff_wait_s: float = 8.0
     hover_radius_m: float = 0.10
@@ -95,6 +107,7 @@ class Camera:
 @dataclass(frozen=True)
 class Tags:
     tag_size_m: float = 0.12
+    camera_pitch_deg: float = 90.0
     min_decision_margin: float = 55.0
     max_hamming: int = 1
     max_pose_err: float = 0.5
@@ -132,9 +145,9 @@ class Sim:
     pose_noise_m: float = 0.0
     sighting_noise_m: float = 0.03
     latency_s: float = 0.13
-    fov_half_angle_deg: float = 44.0
-    view_min_m: float = 0.1
-    view_max_m: float = 1.2
+    view_half_width_m: float = 0.40
+    view_min_m: float = -0.35
+    view_max_m: float = 0.28
     true_tags: tuple[TrueTag, ...] = ()
 
 
@@ -162,6 +175,23 @@ class LiveMap:
 
 
 @dataclass(frozen=True)
+class Uwb:
+    send_to_px4: bool = False
+    debug_port: int = 5010
+    max_start_jump_m: float = 0.30
+    align_solve_period_s: float = 1.0
+    align_max_px4_age_ms: int = 200
+    mirror: str = "auto"
+    align_min_samples: int = 50
+    align_min_span_m: float = 0.8
+    align_min_spread_ratio: float = 0.05
+    align_max_eop_m: float = 0.30
+    align_max_rms_m: float = 0.10
+    align_mirror_margin: float = 2.0
+    align_outlier_k: float = 3.0
+
+
+@dataclass(frozen=True)
 class Settings:
     drone_id: int
     area: Area
@@ -174,7 +204,8 @@ class Settings:
     sim: Sim = field(default_factory=Sim)
     logging: Logging = field(default_factory=Logging)
     live_map: LiveMap = field(default_factory=LiveMap)
-    source: Path | None = None                # file it was loaded from
+    uwb: Uwb = field(default_factory=Uwb)
+    source: Path | None = None               # file it was loaded from
     raw: dict = field(default_factory=dict, compare=False, repr=False)
 
     @property
@@ -281,6 +312,7 @@ def validate(s: Settings) -> None:
            f"area.margin ({a.margin}) is more than half the area's smaller side")
 
     _positive(s.sweep, "sweep", "lane_spacing")
+    _non_negative(s.sweep, "sweep", "camera_offset_m")
     _check(s.sweep.lanes_along in ("x", "y"),
            f"sweep.lanes_along must be 'x' or 'y' (got {s.sweep.lanes_along!r})")
 
@@ -300,6 +332,19 @@ def validate(s: Settings) -> None:
     _non_negative(f, "flight", "turn_time_s", "takeoff_wait_s", "hover_settle_s",
                   "waypoint_timeout_margin_s", "repeat_gap_s", "land_settle_s")
     _check(f.tick_hz <= 100, f"flight.tick_hz must be <= 100 (got {f.tick_hz})")
+    _check(f.nav_mode in ("trajectory", "waypoints"),
+           f"flight.nav_mode must be 'trajectory' or 'waypoints' (got {f.nav_mode!r})")
+    _positive(f, "flight", "traj_start_timeout_s", "traj_start_attempts")
+    _non_negative(f, "flight", "traj_upload_gap_s", "traj_end_margin_s")
+    _check(0.001 <= f.traj_dt_s <= 1.0,
+           f"flight.traj_dt_s must be 0.001-1.0 s (got {f.traj_dt_s})")
+    _check(0 < f.traj_max_speed_mps <= FIRMWARE_SPEED_CAP_MPS,
+           f"flight.traj_max_speed_mps must be > 0 and <= the firmware cap "
+           f"{FIRMWARE_SPEED_CAP_MPS} (got {f.traj_max_speed_mps})")
+    if f.nav_mode == "trajectory":
+        _check(f.cruise_speed_mps <= f.traj_max_speed_mps,
+               f"flight.cruise_speed_mps ({f.cruise_speed_mps}) must be <= "
+               f"flight.traj_max_speed_mps ({f.traj_max_speed_mps})")
 
     _positive(s.safety, "safety", "stale_timeout_s", "mission_time_limit_s")
     _non_negative(s.safety, "safety", "geofence_margin_m")
@@ -318,6 +363,8 @@ def validate(s: Settings) -> None:
            f"tags.min_sightings ({t.min_sightings})")
     _non_negative(t, "tags", "min_decision_margin", "max_hamming",
                   "expected_down_m", "down_tolerance_m", "expected_count")
+    _check(0.0 <= t.camera_pitch_deg <= 90.0,
+           f"tags.camera_pitch_deg must be between 0 and 90 (got {t.camera_pitch_deg})")
     _check(t.max_down_m > t.min_down_m,
            f"tags.max_down_m ({t.max_down_m}) must be > tags.min_down_m ({t.min_down_m})")
     _check(t.outlier_radius_m >= t.confirm_radius_m,
@@ -325,17 +372,14 @@ def validate(s: Settings) -> None:
            f"tags.confirm_radius_m ({t.confirm_radius_m})")
 
     m = s.sim
-    _positive(m, "sim", "speed", "fov_half_angle_deg", "view_max_m", "climb_rate_mps",
+    _positive(m, "sim", "speed", "view_half_width_m", "climb_rate_mps",
               "yaw_rate_deg_s", "camera_fps")
-    _non_negative(m, "sim", "pose_noise_m", "sighting_noise_m", "latency_s", "view_min_m",
-                  "arm_delay_s")
+    _non_negative(m, "sim", "pose_noise_m", "sighting_noise_m", "latency_s", "arm_delay_s")
     for name in ("command_loss", "false_positive_rate"):
         v = getattr(m, name)
         _check(0.0 <= v <= 1.0, f"sim.{name} must be between 0 and 1 (got {v})")
     _check(m.view_max_m > m.view_min_m,
            f"sim.view_max_m ({m.view_max_m}) must be > sim.view_min_m ({m.view_min_m})")
-    _check(m.fov_half_angle_deg < 90,
-           f"sim.fov_half_angle_deg must be < 90 (got {m.fov_half_angle_deg})")
     ids = [tag.id for tag in m.true_tags]
     _check(len(ids) == len(set(ids)), f"sim.true_tags has duplicate ids: {ids}")
     for tag in m.true_tags:
@@ -345,6 +389,17 @@ def validate(s: Settings) -> None:
 
     _positive(s.logging, "logging", "status_period_s")
     _positive(s.live_map, "live_map", "redraw_hz", "arrow_m", "camera_stale_s")
+
+    u = s.uwb
+    _check(u.mirror in ("auto", "yes", "no"),
+           f"uwb.mirror must be 'auto', 'yes' or 'no' (got {u.mirror!r})")
+    _positive(u, "uwb", "align_min_samples", "align_min_span_m", "align_max_eop_m",
+              "align_max_rms_m", "align_outlier_k", "max_start_jump_m",
+              "align_solve_period_s", "align_max_px4_age_ms")
+    _check(1 <= u.debug_port <= 65535, f"uwb.debug_port out of range (got {u.debug_port})")
+    _non_negative(u, "uwb", "align_min_spread_ratio")
+    _check(u.align_mirror_margin >= 1.0,
+           f"uwb.align_mirror_margin must be >= 1 (got {u.align_mirror_margin})")
     _non_negative(s.live_map, "live_map", "view_margin_m")
     _check(s.logging.level.upper() in ("DEBUG", "INFO", "WARNING", "ERROR"),
            f"logging.level must be DEBUG, INFO, WARNING or ERROR "

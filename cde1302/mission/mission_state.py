@@ -13,6 +13,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
 from drone_link import Pose
+from settings import Area
 from tag_map import TagEstimate
 
 
@@ -22,6 +23,7 @@ class StateSnapshot:
     pose: Optional[Pose] = None
     home: Optional[tuple[float, float]] = None
     waypoints: tuple[tuple[float, float], ...] = ()
+    area: Optional[Area] = None                # search area; moves with sweep.start_at_home
     wp_index: int = 0                          # next waypoint to reach
     trajectory: tuple[tuple[float, float], ...] = ()
     tags: tuple[TagEstimate, ...] = ()         # all candidates; .confirmed marks real ones

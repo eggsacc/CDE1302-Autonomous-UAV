@@ -177,3 +177,6 @@ summary (frames, detections, accepted, rejected by reason).
 | `can't open file ... mission.py` | You're not in the `cde1302` folder. |
 | Frames arrive but tags never confirm | Too far, too fast, or not level. Check the camera summary's `rejected:` reasons when you quit. |
 | Pose jumps or drifts a lot | EKF or optical flow issue: check QGroundControl (rangefinder valid? flow quality?). |
+
+
+python mission/mission.py --map

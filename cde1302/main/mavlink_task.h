@@ -124,3 +124,11 @@ drone_state_t mavlink_get_state(void);
 // Convenience: true if we have received position data recently (< 500ms)
 bool mavlink_position_valid(void);
 
+// ---------------------------------------------------------------------------
+// External position (CONFIG_UWB_SEND_TO_PX4)
+// ---------------------------------------------------------------------------
+
+// Newest aligned UWB fix: x/y in PX4 local NED metres, measured at t_us
+// (esp_timer).  mavlink_task sends the latest one in its 20 Hz loop.
+void mavlink_set_vision_position(float x, float y, uint64_t t_us);
+

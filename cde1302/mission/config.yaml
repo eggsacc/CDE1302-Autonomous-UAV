@@ -13,14 +13,25 @@ drone_id: 2              # ESP32 CONFIG_DRONE_ID; drone IP = 192.168.1.(200 + id
 # Search area. PLACEHOLDER numbers: replace with the real area on demo day.
 area:
   x_min: 0.0             # m
-  x_max: 1.5             # m
+  x_max: 3.0             # m
   y_min: 0.0             # m
-  y_max: 1.0             # m
+  y_max: 2.0             # m
   margin: 0.2            # keep waypoints this far inside the edges (m)
 
 sweep:
-  lane_spacing: 0.6      # max distance between lanes (m); measure camera swath in the lab
+  lane_spacing: 0.7      # max distance between lanes (m); measure camera swath in the lab
   lanes_along: x         # "x" = lanes run North-South, "y" = lanes run East-West
+  camera_offset_m: 0.0   # trajectory mode: drone -> middle of the camera's view on the floor (m).
+                         # The heading never changes, so the whole sweep is shifted this far
+                         # backwards so the VIEW, not the drone, covers the area. 0 = no shift,
+                         # for a camera looking straight down.
+  start_at_home: true    # true: at sweep start, move the whole plan (and the area box) so the first
+                         # waypoint is home, the takeoff spot. Only the area's SIZE then matters:
+                         # it extends +x (North) and +y (East) of home, lanes along lanes_along.
+                         # false: the area is fixed in the PX4 frame (x_min..y_max as written).
+  start_in_middle: true  # with start_at_home: home is at the MIDDLE of the area's starting edge, not
+                         # its corner. The lanes spread evenly either side of home, so the drone
+                         # first flies sideways to the first lane. false: waypoint 1 is home.
 
 network:
   telem_port: 5005       # laptop UDP port telemetry arrives on
@@ -31,8 +42,17 @@ network:
   pose_lookup_tolerance_s: 0.25  # a lookup up to this far past the newest pose returns it (s)
 
 flight:
-  cruise_speed_mps: 0.10   # NAV_CRUISE_SPEED_MS in firmware nav_task.h (m/s)
-  turn_time_s: 4.0         # allowance for rotate-in-place at each waypoint (s); measure it
+  nav_mode: trajectory     # "trajectory": firmware plays the whole path, heading stays fixed
+                           # "waypoints": one GOTO per waypoint, drone turns to face each one
+  cruise_speed_mps: 0.20   # trajectory speed; in waypoints mode only used for timeouts (m/s)
+  traj_dt_s: 0.20          # trajectory sample period; the firmware interpolates between samples.
+                           # 0.20 = 2 cm spacing at 0.1 m/s and 6 upload packets for a full sweep (s)
+  traj_max_speed_mps: 0.40 # refuse faster trajectories; firmware caps at 0.50 (m/s)
+  traj_upload_gap_s: 0.06  # gap between upload packets; the ESP reads its queue of 6 at 10 Hz (s)
+  traj_start_timeout_s: 1.5  # re-upload if telemetry doesn't show TRAJ within this (s)
+  traj_start_attempts: 5   # upload attempts before abort-landing (count)
+  traj_end_margin_s: 10.0  # end-of-trajectory timeout = duration + this (s)
+  turn_time_s: 4.0         # waypoints mode: allowance for turning at each waypoint (s)
   takeoff_wait_s: 8.0      # minimum wait after CMD_START before probing for hover (s)
   hover_radius_m: 0.10     # xy must stay within this radius to count as hovering (m)
   hover_settle_s: 2.0      # ...for at least this long (s)
@@ -59,6 +79,7 @@ camera:
 
 tags:
   tag_size_m: 0.12             # edge of the BLACK square, not the paper (m); course tags are 120 mm
+  camera_pitch_deg: 90.0       # lens below the horizon: 90 = straight down, 45 = the old mount (deg)
   min_decision_margin: 55.0    # detector gate, same as firmware (unitless)
   max_hamming: 1               # detector gate, same as firmware (bits)
   max_pose_err: 0.5            # reject poses with reprojection error above this (unitless)
@@ -87,9 +108,9 @@ sim:
   pose_noise_m: 0.0            # std dev of fake telemetry position noise (m)
   sighting_noise_m: 0.03       # std dev of fake tag body-frame position noise (m)
   latency_s: 0.13              # fake camera capture -> laptop delay (s)
-  fov_half_angle_deg: 44.0     # fake camera horizontal half field of view (deg)
-  view_min_m: 0.1              # fake camera sees floor from this far ahead... (m)
-  view_max_m: 1.2              # ...to this far ahead (m)
+  view_half_width_m: 0.40      # fake camera sees a tag this far left/right of the drone (m)
+  view_min_m: -0.35            # ...from this far ahead (negative = behind the drone)... (m)
+  view_max_m: 0.28             # ...to this far ahead; a tag fits the 0.5 m view inside these (m)
   true_tags:                   # fake tags at known positions, PX4 local NED (m); real course: 6 tags
     - {id: 1, x: 0.35, y: 0.15}
     - {id: 3, x: 0.80, y: 0.30}
@@ -110,3 +131,20 @@ live_map:                      # `python mission/mission.py --map ...`
   save_png: true               # save the final map as map.png in the run's log folder
   show_camera: true            # camera panel with tag outlines next to the map
   camera_stale_s: 2.0          # show NO VIDEO when the newest frame is older than this (s)
+
+uwb:                           # LinkTrack UWB -> PX4 alignment (mission/uwb_align.py)
+  send_to_px4: false           # work out the alignment in flight and send it to the drone. Needs
+                               # firmware CONFIG_UWB_SEND_TO_PX4; see UWB_PX4_FLIGHT_TEST.md
+  debug_port: 5010             # UDP port of the drone's debug stream (CONFIG_UWB_DEBUG_PORT)
+  max_start_jump_m: 0.30       # don't send an alignment that would move PX4's position more than this (m)
+  align_solve_period_s: 1.0    # how often to try solving during the sweep (s)
+  align_max_px4_age_ms: 200    # ignore pairs whose PX4 position is older than this (ms)
+  mirror: auto                 # auto | yes | no.  yes = UWB y axis is flipped vs PX4.
+                               # auto needs a path with a turn; set it once the anchor test shows it.
+  align_min_samples: 50        # matched UWB/PX4 samples needed before solving (count)
+  align_min_span_m: 0.8        # path must extend at least this far (m)
+  align_min_spread_ratio: 0.05 # mirror=auto: path "width/length" (eigenvalue ratio) needed to tell a mirror
+  align_max_eop_m: 0.30        # ignore UWB samples whose precision estimate is worse (m)
+  align_max_rms_m: 0.10        # reject the fit if residuals are larger (m)
+  align_mirror_margin: 2.0     # mirror=auto: the other choice must fit this many times worse
+  align_outlier_k: 3.0         # drop samples with residual > k x median residual, then refit

@@ -80,21 +80,20 @@ class LiveMap:
         except AttributeError:              # headless backend
             pass
         ax = self.ax
-        a = settings.area
+        self.area = settings.area
         # Map view: plot (east, north) = (y, x).
-        ax.add_patch(Rectangle((a.y_min, a.x_min), a.y_max - a.y_min, a.x_max - a.x_min,
-                               fill=False, ls="--", lw=1.2, ec=C_AREA, label="search area"))
+        self._area_box = Rectangle((0, 0), 0, 0, fill=False, ls="--", lw=1.2, ec=C_AREA,
+                                   label="search area")
+        ax.add_patch(self._area_box)
+        self._set_area(self.area)
         self._fence = Rectangle((0, 0), 0, 0, fill=False, ls="-", lw=0.8, ec=C_FENCE,
                                 alpha=0.35, label="geofence")
         ax.add_patch(self._fence)
         self._set_fence(None)
 
-        if self.waypoints:
-            ax.plot([w[1] for w in self.waypoints], [w[0] for w in self.waypoints],
-                    ":o", color=C_PLAN, ms=3, lw=1, label="planned path")
-            for i, (x, y) in enumerate(self.waypoints, 1):
-                ax.annotate(str(i), (y, x), textcoords="offset points", xytext=(4, 4),
-                            fontsize=7, color=C_PLAN)
+        (self._plan,) = ax.plot([], [], ":o", color=C_PLAN, ms=3, lw=1, label="planned path")
+        self._plan_labels: list = []
+        self._draw_plan(self.waypoints)
         (self._next,) = ax.plot([], [], "o", ms=14, mfc="none", mec=C_NEXT, mew=2,
                                 label="next waypoint")
         (self._trail,) = ax.plot([], [], "-", color=C_DRONE, lw=1.5, label="drone trail")
@@ -203,17 +202,34 @@ class LiveMap:
         self._cam_title.set_text("   ".join(parts))
         self._cam_title.set_color("black")
 
+    def _draw_plan(self, waypoints: list[tuple[float, float]]) -> None:
+        """(Re)draw the planned path; trajectory mode shifts it at sweep start."""
+        self.waypoints = list(waypoints)
+        self._plan.set_data([w[1] for w in self.waypoints], [w[0] for w in self.waypoints])
+        for a in self._plan_labels:
+            a.remove()
+        self._plan_labels = [
+            self.ax.annotate(str(i), (y, x), textcoords="offset points", xytext=(4, 4),
+                             fontsize=7, color=C_PLAN)
+            for i, (x, y) in enumerate(self.waypoints, 1)]
+
+    def _set_area(self, area) -> None:
+        """(Re)draw the search area box; sweep.start_at_home moves it at sweep start."""
+        self.area = area
+        self._area_box.set_bounds(area.y_min, area.x_min, area.y_max - area.y_min,
+                                  area.x_max - area.x_min)
+
     # -- geometry helpers ---------------------------------------------------
 
     def _set_fence(self, home: Optional[tuple[float, float]]) -> None:
-        x0, x1, y0, y1 = geofence(self.settings.area, home,
-                                  self.settings.safety.geofence_margin_m)
+        x0, x1, y0, y1 = geofence(self.area, home,
+                                  self.settings.safety.geofence_margin_m, self.waypoints)
         self._fence.set_bounds(y0, x0, y1 - y0, x1 - x0)
 
     def _base_bounds(self, home: Optional[tuple[float, float]]) -> list[float]:
         """[x_min, x_max, y_min, y_max] covering the geofence (area + home + margin)."""
-        x0, x1, y0, y1 = geofence(self.settings.area, home,
-                                  self.settings.safety.geofence_margin_m)
+        x0, x1, y0, y1 = geofence(self.area, home,
+                                  self.settings.safety.geofence_margin_m, self.waypoints)
         return [x0, x1, y0, y1]
 
     def _grow(self, x: float, y: float) -> None:
@@ -232,6 +248,15 @@ class LiveMap:
     def update(self, snap: StateSnapshot) -> None:
         """Redraw everything from one snapshot (cheap: only set_data calls)."""
         before = list(self._bounds)
+        moved = snap.area is not None and snap.area != self.area
+        if moved:
+            self._set_area(snap.area)
+        if moved or (snap.waypoints and list(snap.waypoints) != self.waypoints):
+            if snap.waypoints:
+                self._draw_plan(list(snap.waypoints))
+            self._set_fence(snap.home)
+            # Re-fit: the old plan's spot need not stay in view (trail/tags re-grow below).
+            self._bounds = self._base_bounds(snap.home)
         if snap.home is not None:
             self._home.set_data([snap.home[1]], [snap.home[0]])
             self._set_fence(snap.home)

@@ -149,3 +149,82 @@ menu "Drone Configuration"
           Used when laptop/camera_stream.py does not pass --quality.
 
 endmenu
+
+menu "UWB (LinkTrack)"
+
+    config UWB_ENABLED
+        bool "Read a LinkTrack UWB tag on UART2"
+        default n
+        help
+          Starts uwb_task (main/uwb_task.c). Off: the firmware is exactly as
+          without UWB. See mission/UWB_ESP32_BENCH_TEST.md.
+
+    config UWB_RX_PIN
+        int "ESP32 GPIO wired to the module's TX (-1 = not set)"
+        depends on UWB_ENABLED
+        range -1 48
+        default -1
+        help
+          Must be a free pin. Pins used by PX4, the camera, flash/PSRAM, USB,
+          the console or boot strapping are refused at start-up (see the log).
+
+    config UWB_TX_PIN
+        int "ESP32 GPIO wired to the module's RX (-1 = not connected)"
+        depends on UWB_ENABLED
+        range -1 48
+        default -1
+        help
+          Not needed: the drone only reads the module. Leave -1.
+
+    config UWB_BAUD
+        int "UART baud rate"
+        depends on UWB_ENABLED
+        range 9600 3000000
+        default 921600
+        help
+          Must match the module (NAssistant). LinkTrack default: 921600.
+
+    config UWB_LOG_PERIOD_MS
+        int "Serial status log period (ms)"
+        depends on UWB_ENABLED
+        range 200 60000
+        default 2000
+
+    config UWB_DEBUG_UDP
+        bool "Stream raw frames + PX4 pose to the laptop (UDP)"
+        depends on UWB_ENABLED
+        default y
+        help
+          Sent to HOST_IPV4_ADDR. Read with: python mission/tools/uwb_sniff.py --udp 5010
+
+    config UWB_DEBUG_PORT
+        int "Laptop UDP port for the UWB debug stream"
+        depends on UWB_DEBUG_UDP
+        range 1 65535
+        default 5010
+
+    config UWB_SEND_TO_PX4
+        bool "Send UWB position to PX4 (ODOMETRY)"
+        depends on UWB_DEBUG_UDP
+        default n
+        help
+          Once the laptop has sent an alignment (CMD_UWB_ALIGN), send each good
+          UWB fix to PX4 as position-only ODOMETRY in MAV_FRAME_LOCAL_FRD, and
+          answer PX4's TIMESYNC requests. The alignment needs the debug stream.
+          PX4 needs EKF2_EV_CTRL = 1. See mission/UWB_PX4_FLIGHT_TEST.md.
+
+    config UWB_PX4_MAX_EOP_CM
+        int "Largest x/y eop sent to PX4 (cm)"
+        depends on UWB_SEND_TO_PX4
+        range 1 254
+        default 30
+        help
+          Fixes whose x or y precision estimate is worse are not sent.
+
+    config UWB_DEBUG_PERIOD_MS
+        int "Debug stream send period (ms)"
+        depends on UWB_DEBUG_UDP
+        range 20 1000
+        default 100
+
+endmenu

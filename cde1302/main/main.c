@@ -8,6 +8,7 @@
 #include "at_detect.h"
 #include "wifi_task.h"
 #include "odom.h"
+#include "uwb_task.h"
 
 #include <math.h>
 
@@ -215,6 +216,16 @@ void app_main(void)
     nav_task_init();
     at_detect_init();
     odom_init();
+
+    /* UWB starts BEFORE Wi-Fi: wifi_task_init() blocks until connected, and the
+     * UWB serial log must work on the bench without a router. */
+    if (uwb_task_init()) {
+        xTaskCreatePinnedToCore(
+            uwb_task, "uwb", UWB_TASK_STACK,
+            NULL, UWB_TASK_PRIORITY, NULL, UWB_TASK_CORE
+        );
+    }
+
     wifi_task_init();   /* blocks until IP obtained */
 
     /* Core 0: hardware-facing tasks + WiFi telemetry */

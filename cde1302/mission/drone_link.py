@@ -26,6 +26,8 @@ from __future__ import annotations
 
 import bisect
 import logging
+import math
+import random
 import threading
 import time
 from collections import deque
@@ -35,10 +37,11 @@ from typing import Callable, Optional
 import laptop_path  # noqa: F401  (puts laptop/ on sys.path)
 from comms import CommsNode
 from protocol import (CMD_GOTO, CMD_HOLD, CMD_LAND, CMD_START, NAV_STATE_NAMES,
-                      CommandPacket, TelemetryPacket)
+                      CommandPacket, TelemetryPacket, build_traj_packets, build_traj_start)
 
 from geometry import angle_diff, lerp_angle, wrap_angle
 from settings import Settings
+from uwb_link import build_align_command
 
 log = logging.getLogger(__name__)
 
@@ -223,7 +226,8 @@ class DroneLink:
         """
         Args:
             settings: mission settings (drone_id, network, flight, safety).
-            dry_run: if True, START/GOTO/HOLD/LAND are logged but never sent.
+            dry_run: if True, START/GOTO/HOLD/LAND/trajectories are logged
+                but never sent.
             comms: a CommsNode (or test double); default builds one with NO
                 config file, so no setup.yaml start offset is ever sent.
             clock / sleep: injectable for tests.
@@ -241,6 +245,7 @@ class DroneLink:
             listen_port=net.telem_port, cmd_port=net.cmd_port)
         self.poses = PoseBuffer(net.pose_history_s, net.pose_lookup_tolerance_s)
         self.tracker = TelemetryTracker(self.drone_id, self.poses, clock)
+        self._traj_rng = random.Random()
         self._started = False
 
     # -- lifecycle ----------------------------------------------------------
@@ -334,6 +339,22 @@ class DroneLink:
         self._hook(name, f"x{repeats} {details}".strip() + ("" if ok else " FAILED"))
         return ok
 
+    def send_uwb_align(self, a) -> bool:
+        """Tell the ESP32 how to map UWB into PX4's frame (a: uwb_align.Alignment)."""
+        details = (f"theta={math.degrees(a.theta):.1f} deg mirror={a.mirror} "
+                   f"t=({a.tx:.3f}, {a.ty:.3f})")
+        if self.dry_run:
+            self._hook("UWB_ALIGN", f"DRY RUN, not sent {details}")
+            return False
+        try:
+            ok = self.comms.send_raw(self.drone_id,
+                                     build_align_command(a.theta, a.mirror, a.tx, a.ty))
+        except Exception:
+            log.exception("UWB_ALIGN send failed")
+            ok = False
+        self._hook("UWB_ALIGN", details + ("" if ok else " FAILED"))
+        return ok
+
     def _hook(self, name: str, details: str) -> None:
         if self._on_command is not None:
             try:
@@ -356,3 +377,38 @@ class DroneLink:
     def send_land(self) -> bool:
         """CMD_LAND: land in place (flight.land_repeats copies)."""
         return self._send("CMD_LAND", CMD_LAND, self.settings.flight.land_repeats)
+
+    def send_trajectory(self, offsets, dt_ms: int) -> bool:
+        """Upload a trajectory and play it, as laptop/send_trajectory.py does.
+
+        Args:
+            offsets: (n, 3) x, y, z offsets (m, NED) from wherever the drone is
+                when it starts playing; the heading stays as it is then.
+            dt_ms: time between points.
+        Returns:
+            True if every packet went out.  Nothing confirms the drone took
+            it: watch telemetry for nav_state TRAJ and retry otherwise.  A
+            re-upload is safe: the firmware ignores chunks while playing.
+
+        Blocks for about n/80 * traj_upload_gap_s.
+        """
+        f = self.settings.flight
+        traj_id = self._traj_rng.randint(1, 255)     # new id = fresh upload every time
+        packets = build_traj_packets(traj_id, [tuple(map(float, p)) for p in offsets])
+        details = f"id={traj_id} {len(offsets)} pts dt={dt_ms} ms"
+        if self.dry_run:
+            log.warning("DRY RUN: trajectory not sent (%s)", details)
+            self._hook("CMD_TRAJ", f"DRY RUN, not sent {details}")
+            return False
+        ok = True
+        try:
+            for p in packets:
+                ok = self.comms.send_raw(self.drone_id, p) and ok
+                self._sleep(f.traj_upload_gap_s)
+            ok = self.comms.send_raw(self.drone_id, build_traj_start(traj_id, dt_ms)) and ok
+        except Exception:
+            log.exception("trajectory send failed")
+            ok = False
+        log.info("CMD_TRAJ %s %s", details, "sent" if ok else "NOT (fully) sent")
+        self._hook("CMD_TRAJ", details + ("" if ok else " FAILED"))
+        return ok

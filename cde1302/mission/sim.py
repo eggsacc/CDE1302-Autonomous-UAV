@@ -16,6 +16,9 @@ nav_task.c, simplified:
     GOTO:  ROTATING in place (yaw_rate_deg_s) until within NAV_YAW_TOL_RAD of
            the goal bearing, then FLYING straight at cruise_speed_mps;
            ARRIVED at < 0.25 m, then settles onto the goal.
+    TRAJ:  (FLYING only) plays the uploaded offsets from where it is, heading
+           unchanged, nav TRAJ; ARRIVED at the end, holding the last point.
+           Lost upload chunks (command_loss) mean it never starts.
     HOLD:  IDLE, holds where it is (or at the goal if it already arrived).
     LAND:  descends at climb_rate_mps, disarms, back to READY.
 
@@ -25,7 +28,7 @@ stale-telemetry tests.  There is no EKF drift and no obstacle model.
 
 SimTagSource makes `camera_fps` frames per second.  A true tag is "seen" when
 the drone is airborne and the tag lies between view_min_m and view_max_m
-ahead and within +-fov_half_angle_deg.  The body-frame position gets
+ahead and within +-view_half_width_m sideways.  The body-frame position gets
 sighting_noise_m noise, is wrapped in a Detection and goes through the real
 TagFilter (same range / floor / yaw-rate checks as the real pipeline), and is
 delivered latency_s after capture.  false_positive_rate adds wrong-ID
@@ -48,8 +51,10 @@ from typing import Callable, Optional
 import numpy as np
 
 import laptop_path  # noqa: F401
-from apriltag_host import CAM_POS_M, R_BODY_CAM, Detection
-from protocol import NAV_ARRIVED, NAV_FLYING, NAV_IDLE, NAV_ROTATING
+from apriltag_host import Detection
+from camera_mount import body_to_camera
+from protocol import (NAV_ARRIVED, NAV_FLYING, NAV_IDLE, NAV_ROTATING, NAV_TRAJ,
+                      TRAJ_CHUNK_PTS)
 
 from drone_link import Pose, PoseBuffer
 from geometry import angle_diff, body_to_ned, ned_to_body, wrap_angle
@@ -121,12 +126,15 @@ class SimDrone:
 
         # vehicle state
         self.x, self.y, self.heading = start_pose[0], start_pose[1], wrap_angle(start_pose[2])
+        self.uwb_alignments: list = []             # uwb_align.Alignment, as sent
         self.alt = 0.0
         self.armed = False
         self.phase = "READY"          # READY, ARMING, CLIMBING, SETTLING, FLYING, LANDING
         self._phase_t = 0.0
         self.nav = NAV_IDLE
         self._goal: Optional[tuple[float, float]] = None
+        # playing trajectory: (origin x, origin y, offsets (n, 3), dt s, start t)
+        self._traj: Optional[tuple[float, float, np.ndarray, float, float]] = None
         self._hold: tuple[float, float] = (self.x, self.y)
 
         self._t: Optional[float] = None            # sim time reached
@@ -161,6 +169,18 @@ class SimDrone:
         with self._lock:
             self.advance()
             self._telem_paused = paused
+
+    def ekf_jump(self, dx: float, dy: float) -> None:
+        """Shift the estimated position by (dx, dy), like an EKF reset: the drone
+        and whatever it is following (hold point, trajectory) move together."""
+        with self._lock:
+            self.advance()
+            self.x += dx
+            self.y += dy
+            self._hold = (self._hold[0] + dx, self._hold[1] + dy)
+            if self._traj is not None:
+                ox, oy, pts, tdt, t0 = self._traj
+                self._traj = (ox + dx, oy + dy, pts, tdt, t0)
 
     def true_pose_at(self, t: float) -> Optional[tuple[float, float, float, float]]:
         """Noise-free (x, y, heading, altitude) at time t, or None."""
@@ -251,14 +271,34 @@ class SimDrone:
         def apply() -> None:
             if self.phase == "FLYING":             # firmware: ignored unless flying
                 self._goal = (float(x), float(y))
+                self._traj = None                  # a GOTO replaces a trajectory
                 self.nav = NAV_ROTATING
         return self._deliver("CMD_GOTO", 1, apply, f"goal=({x:.3f}, {y:.3f})")
 
+    def send_trajectory(self, offsets, dt_ms: int) -> bool:
+        pts = np.asarray(offsets, dtype=float)
+        extra_packets = -(-len(pts) // TRAJ_CHUNK_PTS)   # data chunks; START is _deliver's
+
+        def apply() -> None:
+            loss = self.settings.sim.command_loss
+            if any(self._rng.random() < loss for _ in range(extra_packets)):
+                return                             # a chunk was lost: upload incomplete
+            # firmware: only in the FLYING phase, and not while already playing
+            if self.phase == "FLYING" and self.nav != NAV_TRAJ and len(pts) >= 2:
+                self._traj = (self.x, self.y, pts, dt_ms / 1000.0, self._t)
+                self._goal = None
+                self.nav = NAV_TRAJ
+        return self._deliver("CMD_TRAJ", 1, apply, f"{len(pts)} pts dt={dt_ms} ms")
+
+    def send_uwb_align(self, alignment) -> bool:
+        self.uwb_alignments.append(alignment)
+        return True
+
     def send_hold(self) -> bool:
         def apply() -> None:
-            if self._goal is not None:             # nav_cancel() with an active goal
+            if self._goal is not None or self._traj is not None:   # nav_cancel()
                 self._hold = (self.x, self.y)
-            self._goal = None
+            self._goal, self._traj = None, None
             self.nav = NAV_IDLE
         return self._deliver("CMD_HOLD", 1, apply)
 
@@ -268,7 +308,7 @@ class SimDrone:
                 self.armed = False
                 self._set_phase("READY")
             elif self.phase in ("CLIMBING", "SETTLING", "FLYING"):
-                self._goal, self.nav = None, NAV_IDLE
+                self._goal, self._traj, self.nav = None, None, NAV_IDLE
                 self._set_phase("LANDING")
         return self._deliver("CMD_LAND", self.settings.flight.land_repeats, apply)
 
@@ -342,6 +382,19 @@ class SimDrone:
                 self._set_phase("READY")
             return
         if self.phase != "FLYING":
+            return
+
+        if self._traj is not None:               # firmware traj_tick: PX4 tracks it,
+            ox, oy, pts, tdt, t0 = self._traj     # heading stays as it was
+            k, last = (self._t - t0) / tdt, len(pts) - 1
+            if k >= last:
+                self.x, self.y = ox + pts[last, 0], oy + pts[last, 1]
+                self._hold, self._traj, self.nav = (self.x, self.y), None, NAV_ARRIVED
+            else:
+                i = int(k)
+                a = k - i
+                self.x = ox + pts[i, 0] + a * (pts[i + 1, 0] - pts[i, 0])
+                self.y = oy + pts[i, 1] + a * (pts[i + 1, 1] - pts[i, 1])
             return
 
         if self._goal is None:                   # IDLE or ARRIVED: hold the setpoint
@@ -428,10 +481,9 @@ class SimTagSource:
     # -- frames -------------------------------------------------------------
 
     def in_view(self, forward: float, right: float) -> bool:
-        """Simple footprint: a wedge on the floor ahead of the drone."""
+        """Simple footprint: a rectangle on the floor around the drone."""
         s = self.settings.sim
-        return (s.view_min_m <= forward <= s.view_max_m
-                and abs(math.degrees(math.atan2(right, forward))) <= s.fov_half_angle_deg)
+        return s.view_min_m <= forward <= s.view_max_m and abs(right) <= s.view_half_width_m
 
     def pump(self) -> int:
         """Capture every frame due up to now and deliver sightings whose
@@ -453,8 +505,7 @@ class SimTagSource:
         return len(due)
 
     def _detection(self, tag_id: int, body: tuple[float, float, float]) -> Detection:
-        t = tuple(float(v) for v in np.asarray(R_BODY_CAM).T
-                  @ (np.asarray(body) - np.asarray(CAM_POS_M)))
+        t = body_to_camera(body, self.settings.tags.camera_pitch_deg)
         return Detection(id=tag_id, hamming=0, decision_margin=200.0,
                          centre=(160.0, 120.0), corners=((0.0, 0.0),) * 4,
                          pose_valid=True, t=t, R=tuple(np.eye(3).ravel()),
@@ -481,7 +532,7 @@ class SimTagSource:
                 seen.append((tag.id, f, r, tag.x, tag.y))
         if self._rng.random() < sim.false_positive_rate:
             f = self._rng.uniform(sim.view_min_m, sim.view_max_m)
-            r = f * math.tan(math.radians(self._rng.uniform(-1, 1) * sim.fov_half_angle_deg))
+            r = self._rng.uniform(-sim.view_half_width_m, sim.view_half_width_m)
             seen.append((self._rng.randrange(22), f, r, *body_to_ned(f, r, x, y, heading)))
         n = sim.sighting_noise_m
         t_detect = tc + sim.latency_s
@@ -515,11 +566,13 @@ class SimTagSource:
             return self._view_cache
         drone = (x, y, heading)
         floor = [FloorTag(t.id, t.x, t.y) for t in self.settings.sim.true_tags]
+        pitch = self.settings.tags.camera_pitch_deg
         gray = render_view(floor, drone, altitude=round(max(alt, 0.02), 2), supersample=1,
-                           jpeg_quality=None, seed=int(tc * 1000) % 100000)
+                           jpeg_quality=None, seed=int(tc * 1000) % 100000, pitch_deg=pitch)
         drawn = []
         for tag_id, north, east, reason in marks:
-            corners = floor_tag_corners_px(FloorTag(tag_id, north, east), drone, alt)
+            corners = floor_tag_corners_px(FloorTag(tag_id, north, east), drone, alt,
+                                           pitch_deg=pitch)
             if corners is not None:
                 drawn.append(TagMark(tag_id, corners, reason))
         self._view_cache = CameraView(gray, tc, tuple(drawn),

@@ -14,7 +14,8 @@ import time
 import numpy as np
 import pytest
 
-from apriltag_host import CAM_POS_M, R_BODY_CAM, Detection, Detector
+from apriltag_host import Detection, Detector
+from camera_mount import body_to_camera, camera_to_body
 from drone_link import Pose, PoseBuffer
 from geometry import body_to_ned
 from protocol import CMD_CAMERA_STREAM, PKT_CMD
@@ -71,7 +72,7 @@ def test_capture_time():
 
 
 @pytest.mark.parametrize("heading_deg", [0, 90, 180, -90, -135, 30])
-@pytest.mark.parametrize("forward, right", [(0.6, 0.0), (0.5, 0.25), (0.8, -0.3)])
+@pytest.mark.parametrize("forward, right", [(0.1, 0.0), (0.15, 0.25), (-0.2, -0.3)])
 def test_synthetic_tag_lands_within_a_few_cm(detector, tag_filter, heading_deg,
                                              forward, right):
     drone = (0.4, -0.2, math.radians(heading_deg))
@@ -89,8 +90,8 @@ def test_synthetic_tag_lands_within_a_few_cm(detector, tag_filter, heading_deg,
 
 def test_several_tags_in_one_frame(detector, tag_filter):
     drone = (1.0, 0.5, math.radians(60))
-    tags = [tag_ahead(drone, 0.55, -0.3, 1), tag_ahead(drone, 0.6, 0.0, 9),
-            tag_ahead(drone, 0.75, 0.35, 12)]
+    tags = [tag_ahead(drone, 0.1, -0.3, 1), tag_ahead(drone, 0.15, 0.0, 9),
+            tag_ahead(drone, -0.2, 0.3, 12)]
     got, _ = process_gray(render_view(tags, drone), detector, tag_filter,
                           StillPoses(*drone), 0.0, 0.0)
     assert sorted(s.tag_id for s in got) == [1, 9, 12]
@@ -105,7 +106,7 @@ def test_uses_pose_at_capture_time_not_latest(detector, tag_filter):
     buf.append(Pose(10.0, 0.0, 0.0, 0.0, 2))
     buf.append(Pose(11.0, 0.1, 0.0, 0.0, 2))
     drone_then = (0.05, 0.0, 0.0)
-    tag = tag_ahead(drone_then, 0.6, 0.1)
+    tag = tag_ahead(drone_then, 0.1, 0.1)
     got, _ = process_gray(render_view([tag], drone_then), detector, tag_filter,
                           buf, 10.5, 11.0)
     assert got[0].drone.x == pytest.approx(0.05)
@@ -116,7 +117,7 @@ def test_wrong_tag_size_is_caught_by_the_floor_check(detector, settings):
     # 90 mm tag with the detector told 120 mm: everything looks 4/3 too far.
     floor_only = TagFilter(dataclasses.replace(settings.tags, tags_on_floor=True))
     drone = (0.0, 0.0, 0.0)
-    n, e = body_to_ned(0.6, 0.0, *drone)
+    n, e = body_to_ned(0.1, 0.0, *drone)
     gray = render_view([FloorTag(3, n, e, 0.2, size=0.09)], drone)
     got, rejected = process_gray(gray, detector, floor_only, StillPoses(*drone), 0, 0)
     assert got == [] and rejected == [(3, R_HEIGHT)]
@@ -126,8 +127,8 @@ def test_marks_outline_every_detection(detector, settings):
     # One accepted tag and one rejected (too high off the floor in floor mode).
     floor_only = TagFilter(dataclasses.replace(settings.tags, tags_on_floor=True))
     drone = (0.0, 0.0, 0.0)
-    good = tag_ahead(drone, 0.6, -0.2, tag_id=3)
-    n, e = body_to_ned(0.6, 0.25, *drone)
+    good = tag_ahead(drone, 0.1, -0.2, tag_id=3)
+    n, e = body_to_ned(0.1, 0.25, *drone)
     small = FloorTag(9, n, e, 0.3, size=0.09)        # looks too far -> height reject
     marks = []
     process_gray(render_view([good, small], drone), detector, floor_only,
@@ -153,8 +154,7 @@ def test_empty_floor_gives_nothing(detector, tag_filter):
 def make_det(body=(0.6, 0.1, 0.5), margin=200.0, hamming=0, pose_err=1e-4,
              pose=True, tag_id=4) -> Detection:
     """A Detection whose t_body equals `body` (camera frame solved backwards)."""
-    R = np.asarray(R_BODY_CAM)
-    t = tuple(R.T @ (np.asarray(body) - np.asarray(CAM_POS_M)))
+    t = body_to_camera(body, 90.0)
     return Detection(id=tag_id, hamming=hamming, decision_margin=margin,
                      centre=(160.0, 120.0), corners=((0, 0),) * 4, pose_valid=pose,
                      t=t if pose else None, R=tuple(np.eye(3).ravel()) if pose else None,
@@ -162,7 +162,23 @@ def make_det(body=(0.6, 0.1, 0.5), margin=200.0, hamming=0, pose_err=1e-4,
 
 
 def test_make_det_round_trips():
-    assert make_det((0.6, 0.1, 0.5)).t_body == pytest.approx((0.6, 0.1, 0.5))
+    assert camera_to_body(make_det((0.6, 0.1, 0.5)).t, 90.0) == pytest.approx((0.6, 0.1, 0.5))
+
+
+def test_camera_straight_down_axes():
+    # Top of the image = forward, right of the image = right, lens = down.
+    assert camera_to_body((0.0, -0.1, 0.5), 90.0) == pytest.approx((0.12, 0.0, 0.5))
+    assert camera_to_body((0.2, 0.0, 0.5), 90.0) == pytest.approx((0.02, 0.2, 0.5))
+
+
+@pytest.mark.parametrize("pitch", [45.0, 60.0])
+def test_a_tilted_camera_is_set_by_config(detector, settings, pitch):
+    f = TagFilter(dataclasses.replace(settings.tags, camera_pitch_deg=pitch))
+    drone = (0.4, -0.2, 0.5)
+    tag = tag_ahead(drone, 0.55, 0.1)
+    got, rejected = process_gray(render_view([tag], drone, pitch_deg=pitch), detector, f,
+                                 StillPoses(*drone), 0, 0)
+    assert rejected == [] and math.dist((got[0].x, got[0].y), (tag.north, tag.east)) < TOL_M
 
 
 def test_accepts_a_good_detection(tag_filter):
@@ -241,7 +257,7 @@ def test_pipeline_thread_end_to_end(settings):
     esp.settimeout(3.0)
 
     drone = (0.3, 0.2, math.radians(-90))
-    tag = tag_ahead(drone, 0.6, 0.05, tag_id=7)
+    tag = tag_ahead(drone, 0.1, 0.05, tag_id=7)
     poses = StillPoses(*drone)
     got = []
     pipe = TagPipeline(s, poses, esp_ip=lambda: "127.0.0.1", on_sighting=got.append,

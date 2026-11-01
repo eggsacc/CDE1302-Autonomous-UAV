@@ -211,7 +211,7 @@ def one_tag(settings, x, y, **sim_kw):
 
 
 def test_tag_in_view_is_seen_at_camera_rate_with_latency(settings, clock):
-    s = one_tag(settings, 0.6, 0.0)                       # 0.6 m ahead of start
+    s = one_tag(settings, 0.2, 0.0)                       # 0.2 m ahead of start
     d = airborne(s, clock)
     got = []
     cam = SimTagSource(s, d, got.append, clock=clock, threaded=False)
@@ -221,12 +221,12 @@ def test_tag_in_view_is_seen_at_camera_rate_with_latency(settings, clock):
     for g in got:
         assert g.tag_id == 4
         assert g.t_detect - g.t_capture == pytest.approx(s.sim.latency_s)
-        assert math.dist((g.x, g.y), (0.6, 0.0)) < 5 * s.sim.sighting_noise_m
+        assert math.dist((g.x, g.y), (0.2, 0.0)) < 5 * s.sim.sighting_noise_m
     assert cam.stats().accepted == len(got)
 
 
 def test_tag_outside_footprint_or_on_ground_not_seen(settings, clock):
-    s = with_sim(settings, true_tags=(TrueTag(4, -0.6, 0.0), TrueTag(5, 0.6, 0.0)))
+    s = with_sim(settings, true_tags=(TrueTag(4, -0.6, 0.0), TrueTag(5, 0.2, 0.0)))
     d = SimDrone(s, clock)
     d.start()
     got = []
@@ -243,8 +243,8 @@ def test_tag_outside_footprint_or_on_ground_not_seen(settings, clock):
 def test_turning_sightings_are_rejected(settings, clock):
     # Tag ends up in view only while rotating fast -> yaw-rate filter drops it.
     # The 180 deg turn goes anticlockwise (North -> West -> South), sweeping
-    # the camera past a tag 0.6 m West of the drone.
-    s = one_tag(settings, 0.0, -0.6, yaw_rate_deg_s=90.0)
+    # the camera past a tag 0.42 m West of the drone.
+    s = one_tag(settings, 0.0, -0.42, yaw_rate_deg_s=90.0)
     d = airborne(s, clock)
     got = []
     cam = SimTagSource(s, d, got.append, clock=clock, threaded=False)
@@ -256,7 +256,7 @@ def test_turning_sightings_are_rejected(settings, clock):
 
 
 def test_sim_sightings_confirm_in_tag_map(settings, clock):
-    s = one_tag(settings, 0.7, 0.1, false_positive_rate=0.3)
+    s = one_tag(settings, 0.2, 0.1, false_positive_rate=0.3)
     d = airborne(s, clock)
     tm = TagMap.from_settings(s.tags)
     cam = SimTagSource(s, d, tm.add, clock=clock, threaded=False)
@@ -264,12 +264,12 @@ def test_sim_sightings_confirm_in_tag_map(settings, clock):
     run(clock, d, 5.0, cam=cam)
     confirmed = tm.estimates(confirmed_only=True)
     assert [e.tag_id for e in confirmed] == [4]
-    assert math.dist((confirmed[0].x, confirmed[0].y), (0.7, 0.1)) < 0.03
+    assert math.dist((confirmed[0].x, confirmed[0].y), (0.2, 0.1)) < 0.03
 
 
 def test_threaded_source_delivers(settings, clock):
     import time
-    s = one_tag(settings, 0.6, 0.0)
+    s = one_tag(settings, 0.2, 0.0)
     d = airborne(s, clock)
     got = []
     cam = SimTagSource(s, d, got.append, clock=clock)    # pumps on its own thread
@@ -284,7 +284,7 @@ def test_threaded_source_delivers(settings, clock):
 
 
 def test_sim_camera_view_for_the_live_map(settings, clock):
-    s = one_tag(settings, 0.6, 0.0)
+    s = one_tag(settings, 0.2, 0.0)
     d = airborne(s, clock)
     cam = SimTagSource(s, d, lambda _: None, clock=clock, threaded=False)
     assert cam.latest_view() is None                      # no frame yet
@@ -303,7 +303,7 @@ def test_sim_camera_view_for_the_live_map(settings, clock):
 
 
 def test_sim_camera_view_marks_rejections(settings, clock):
-    s = one_tag(settings, 0.0, -0.6, yaw_rate_deg_s=90.0)
+    s = one_tag(settings, 0.0, -0.42, yaw_rate_deg_s=90.0)
     d = airborne(s, clock)
     cam = SimTagSource(s, d, lambda _: None, clock=clock, threaded=False)
     cam.start()
@@ -315,3 +315,50 @@ def test_sim_camera_view_marks_rejections(settings, clock):
         if view is not None:
             reasons |= {m.reason for m in view.marks}
     assert R_YAW_RATE in reasons
+
+
+# ---------------------------------------------------------------------------
+# Trajectory playback
+# ---------------------------------------------------------------------------
+
+def test_trajectory_plays_with_fixed_heading_then_arrives(settings, clock):
+    from protocol import NAV_TRAJ
+    from trajectory import build_trajectory
+    d = airborne(settings, clock)
+    h0 = d.heading
+    t = build_trajectory((d.x, d.y), [(0.0, 1.0), (1.0, 1.0)], 0.1, 0.05)
+    assert d.send_trajectory(t.offsets, t.dt_ms)
+    states = run(clock, d, 5.0)
+    assert states[0] == NAV_TRAJ
+    assert d.y == pytest.approx(0.5, abs=0.03) and d.x == pytest.approx(0.0, abs=1e-9)
+    run(clock, d, t.duration)
+    assert d.latest_pose().nav_state == NAV_ARRIVED
+    assert (d.x, d.y) == (pytest.approx(1.0), pytest.approx(1.0))
+    assert all(abs(p.heading - h0) < 1e-9 for p in d.poses.snapshot())   # never turned
+
+
+def test_trajectory_ignored_unless_flying_and_hold_cancels_it(settings, clock):
+    from trajectory import build_trajectory
+    d = SimDrone(settings, clock)
+    d.start()
+    run(clock, d, 0.5)
+    t = build_trajectory((0.0, 0.0), [(1.0, 0.0)], 0.1, 0.05)
+    d.send_trajectory(t.offsets, t.dt_ms)               # still on the ground
+    assert d.latest_pose().nav_state == NAV_IDLE
+    d = airborne(settings, clock)
+    d.send_trajectory(t.offsets, t.dt_ms)
+    run(clock, d, 3.0)
+    d.send_hold()
+    x = d.x
+    run(clock, d, 3.0)
+    assert d.x == pytest.approx(x) and d.latest_pose().nav_state == NAV_IDLE
+
+
+def test_lost_upload_chunk_means_no_start(settings, clock):
+    from trajectory import build_trajectory
+    d = airborne(with_sim(settings, command_loss=0.0), clock)
+    d.settings = with_sim(settings, command_loss=1.0)
+    t = build_trajectory((0.0, 0.0), [(1.0, 0.0)], 0.1, 0.05)
+    d.send_trajectory(t.offsets, t.dt_ms)
+    run(clock, d, 1.0)
+    assert d.latest_pose().nav_state == NAV_IDLE and d.x == pytest.approx(0.0)
