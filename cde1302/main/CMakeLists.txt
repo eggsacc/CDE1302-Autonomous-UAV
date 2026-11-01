@@ -12,6 +12,7 @@ idf_component_register(
         "nlink_parser.c"
         "uwb_debug_pack.c"
         "uwb_px4.c"
+        "traj_gate.c"
         "uwb_task.c"
     INCLUDE_DIRS "."
     REQUIRES

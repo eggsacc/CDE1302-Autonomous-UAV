@@ -74,6 +74,7 @@ class Flight:
     traj_start_timeout_s: float = 1.5
     traj_start_attempts: int = 5
     traj_end_margin_s: float = 10.0
+    traj_timeout_factor: float = 4.0
     turn_time_s: float = 4.0
     takeoff_wait_s: float = 8.0
     hover_radius_m: float = 0.10
@@ -336,6 +337,8 @@ def validate(s: Settings) -> None:
            f"flight.nav_mode must be 'trajectory' or 'waypoints' (got {f.nav_mode!r})")
     _positive(f, "flight", "traj_start_timeout_s", "traj_start_attempts")
     _non_negative(f, "flight", "traj_upload_gap_s", "traj_end_margin_s")
+    _check(f.traj_timeout_factor >= 1.0,
+           f"flight.traj_timeout_factor must be >= 1 (got {f.traj_timeout_factor})")
     _check(0.001 <= f.traj_dt_s <= 1.0,
            f"flight.traj_dt_s must be 0.001-1.0 s (got {f.traj_dt_s})")
     _check(0 < f.traj_max_speed_mps <= FIRMWARE_SPEED_CAP_MPS,

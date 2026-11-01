@@ -134,6 +134,24 @@ menu "Drone Configuration"
         help
           GPIO PX4 RX PIN
 
+    config TRAJ_LEASH_CM
+        int "Trajectory: setpoint stops if the drone is this far behind (cm)"
+        range 0 200
+        default 40
+        help
+          The setpoint slows down from 60% of this distance and stops at it, so
+          the drone flies every lane and corner. Set well above the drone's
+          normal wander, or it will keep stopping.
+          0 = play on the clock, whether or not the drone keeps up.
+
+    config TRAJ_CORNER_CM
+        int "Trajectory: how close to get to each corner (cm)"
+        range 0 100
+        default 12
+        help
+          At each lane end and at the last point the setpoint stops until the
+          drone is this close. 0 = no stop at corners.
+
     config CAMERA_STREAM_DEFAULT_FPS
         int "Camera preview default frame rate"
         range 1 15

@@ -36,7 +36,9 @@ Navigation (flight.nav_mode):
         firmware plays itself, as laptop/send_trajectory.py does.  The heading
         stays whatever it was at takeoff, so the sweep is first shifted back by
         sweep.camera_offset_m so the camera's view covers the area.  Start is
-        confirmed by nav_state TRAJ (re-uploaded if not), end by ARRIVED.
+        confirmed by nav_state TRAJ (re-uploaded if not), end by ARRIVED.  The
+        firmware's setpoint waits whenever the drone falls behind, so a sweep
+        takes as long as it takes (flight.traj_timeout_factor limits that).
     waypoints  One GOTO per waypoint; the drone turns to face each one.
 
 With sweep.start_at_home the plan and the area are then moved together so the
@@ -671,7 +673,9 @@ class Mission:
                 job.started_t = pose.t
                 self.log.event("TRAJ_STARTED", f"{job.name} (attempt {job.attempts}), "
                                f"ends in about {job.traj.duration:.1f} s")
-            elif now - job.sent_t >= f.traj_start_timeout_s:
+            elif now - job.sent_t >= f.traj_start_timeout_s and pose.t > job.sent_t:
+                # Only fresh telemetry can show it didn't start: during a Wi-Fi
+                # gap the drone may well be playing it already.
                 if job.attempts >= f.traj_start_attempts:
                     self.log.event("TRAJ_FAILED", f"{job.name}: not started after "
                                    f"{job.attempts} attempts (nav {pose.nav_state_name})")
@@ -685,7 +689,8 @@ class Mission:
             job.result = "done"
         elif pose.t > job.started_t + NAV_ACK_DELAY_S and pose.nav_state == NAV_IDLE:
             job.result = "stopped"              # cancelled on the drone (HOLD, link loss)
-        elif now > job.started_t + job.traj.duration + f.traj_end_margin_s:
+        elif now > (job.started_t + job.traj.duration * f.traj_timeout_factor
+                    + f.traj_end_margin_s):
             job.result = "timeout"
         if job.result is not None:
             self.log.event("TRAJ_END", f"{job.name}: {job.result} after "

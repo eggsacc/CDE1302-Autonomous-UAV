@@ -4,6 +4,7 @@
 #include "vfh.h"
 #include "wifi_task.h"
 #include "odom.h"       /* map_to_odom() — convert goal each tick */
+#include "traj_gate.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -46,7 +47,8 @@ static uint8_t    s_traj_id;       /* current upload id, 0 = none / already play
 static uint16_t   s_traj_dt_ms;
 static float      s_traj_org[3];   /* odom position where playback started        */
 static float      s_traj_yaw;
-static int64_t    s_traj_t0_us;
+static traj_gate_t s_traj_gate;    /* how far along the setpoint may go           */
+static int64_t    s_traj_tick_us;  /* esp_timer time of the previous traj_tick()  */
 
 /* ---------------------------------------------------------------------------
  * Helpers
@@ -226,16 +228,55 @@ static bool collision_avoid(float goal_z)
     return true;
 }
 
+/* First sample after `from` where the path turns by more than about 30 deg
+ * (a lane end), or the last sample.  Turns are found from the points alone, so
+ * the upload format stays as laptop/protocol.py has it. */
+static int traj_next_corner(int from)
+{
+    int last = s_traj_n - 1;
+    for (int i = from + 1; i < last; i++) {
+        float ax = s_traj[i].x - s_traj[i - 1].x, ay = s_traj[i].y - s_traj[i - 1].y;
+        float bx = s_traj[i + 1].x - s_traj[i].x, by = s_traj[i + 1].y - s_traj[i].y;
+        float mags = sqrtf((ax * ax + ay * ay) * (bx * bx + by * by));
+        if (mags > 1e-8f && ax * bx + ay * by < 0.87f * mags) return i;
+    }
+    return last;
+}
+
 /* ---------------------------------------------------------------------------
  * Trajectory playback — linear interpolation between samples, with the
- * segment velocity as feedforward so PX4 tracks without lag.
+ * segment velocity as feedforward so PX4 tracks without lag.  The setpoint
+ * eases to a stop as the drone falls CONFIG_TRAJ_LEASH_CM behind (traj_gate.h).
  * --------------------------------------------------------------------------- */
 static void traj_tick(void)
 {
-    float k    = (float)(esp_timer_get_time() - s_traj_t0_us) / (1000.0f * s_traj_dt_ms);
-    int   last = s_traj_n - 1;
+    int64_t now_us = esp_timer_get_time();
+    float elapsed  = (float)(now_us - s_traj_tick_us) / 1e6f;
+    s_traj_tick_us = now_us;
 
-    if (k >= (float)last) {
+    if (s_traj_gate.corner < 0) {
+        s_traj_gate.corner = traj_next_corner((int)s_traj_gate.k);
+    }
+
+    int   last = s_traj_n - 1;
+    int   i    = (int)s_traj_gate.k;
+    if (i > last - 1) i = last - 1;
+    float a    = s_traj_gate.k - (float)i;
+    const traj_pt_t *p0 = &s_traj[i], *p1 = &s_traj[i + 1];
+    float sp_x = s_traj_org[0] + p0->x + a * (p1->x - p0->x);
+    float sp_y = s_traj_org[1] + p0->y + a * (p1->y - p0->y);
+    float sp_z = s_traj_org[2] + p0->z + a * (p1->z - p0->z);
+
+    drone_state_t st = mavlink_get_state();
+    float err = sqrtf((sp_x - st.x) * (sp_x - st.x) + (sp_y - st.y) * (sp_y - st.y));
+    traj_gate_result_t step = traj_gate_step(&s_traj_gate, elapsed, err,
+                                             mavlink_position_valid());
+
+    if (step == TRAJ_GATE_WAIT) {
+        mavlink_set_position_ned(sp_x, sp_y, sp_z, s_traj_yaw);
+        return;
+    }
+    if (step == TRAJ_GATE_DONE) {
         const traj_pt_t *p = &s_traj[last];
         mavlink_set_position_ned(s_traj_org[0] + p->x, s_traj_org[1] + p->y,
                                  s_traj_org[2] + p->z, s_traj_yaw);
@@ -250,15 +291,9 @@ static void traj_tick(void)
         return;
     }
 
-    int   i  = (int)k;
-    float a  = k - (float)i;
-    float hz = 1000.0f / (float)s_traj_dt_ms;
-    const traj_pt_t *p0 = &s_traj[i], *p1 = &s_traj[i + 1];
-
+    float hz = s_traj_gate.rate * 1000.0f / (float)s_traj_dt_ms;
     mavlink_set_position_velocity_ned(
-        s_traj_org[0] + p0->x + a * (p1->x - p0->x),
-        s_traj_org[1] + p0->y + a * (p1->y - p0->y),
-        s_traj_org[2] + p0->z + a * (p1->z - p0->z),
+        sp_x, sp_y, sp_z,
         (p1->x - p0->x) * hz, (p1->y - p0->y) * hz, (p1->z - p0->z) * hz,
         s_traj_yaw);
 }
@@ -462,7 +497,11 @@ void nav_traj_start(uint8_t id, uint16_t dt_ms)
         s_traj_org[2] = st.z;
         s_traj_yaw    = st.heading;
         s_traj_dt_ms  = dt_ms;
-        s_traj_t0_us  = esp_timer_get_time();
+        traj_gate_start(&s_traj_gate, s_traj_n, dt_ms / 1000.0f,
+                        CONFIG_TRAJ_LEASH_CM / 100.0f,
+                        CONFIG_TRAJ_CORNER_CM / 100.0f);
+        s_traj_gate.corner = traj_next_corner(0);
+        s_traj_tick_us = esp_timer_get_time();
         s_traj_id     = 0;              /* consume: a repeated START cannot replay */
         s_nav.state    = NAV_TRAJ;
         s_nav.has_goal = true;

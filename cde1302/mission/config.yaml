@@ -15,11 +15,11 @@ area:
   x_min: 0.0             # m
   x_max: 3.0             # m
   y_min: 0.0             # m
-  y_max: 2.0             # m
+  y_max: 1.0             # m
   margin: 0.2            # keep waypoints this far inside the edges (m)
 
 sweep:
-  lane_spacing: 0.7      # max distance between lanes (m); measure camera swath in the lab
+  lane_spacing: 0.6      # max distance between lanes (m); measure camera swath in the lab
   lanes_along: x         # "x" = lanes run North-South, "y" = lanes run East-West
   camera_offset_m: 0.0   # trajectory mode: drone -> middle of the camera's view on the floor (m).
                          # The heading never changes, so the whole sweep is shifted this far
@@ -44,14 +44,15 @@ network:
 flight:
   nav_mode: trajectory     # "trajectory": firmware plays the whole path, heading stays fixed
                            # "waypoints": one GOTO per waypoint, drone turns to face each one
-  cruise_speed_mps: 0.20   # trajectory speed; in waypoints mode only used for timeouts (m/s)
+  cruise_speed_mps: 0.12   # trajectory speed; in waypoints mode only used for timeouts (m/s)
   traj_dt_s: 0.20          # trajectory sample period; the firmware interpolates between samples.
                            # 0.20 = 2 cm spacing at 0.1 m/s and 6 upload packets for a full sweep (s)
   traj_max_speed_mps: 0.40 # refuse faster trajectories; firmware caps at 0.50 (m/s)
   traj_upload_gap_s: 0.06  # gap between upload packets; the ESP reads its queue of 6 at 10 Hz (s)
   traj_start_timeout_s: 1.5  # re-upload if telemetry doesn't show TRAJ within this (s)
   traj_start_attempts: 5   # upload attempts before abort-landing (count)
-  traj_end_margin_s: 10.0  # end-of-trajectory timeout = duration + this (s)
+  traj_end_margin_s: 10.0  # end-of-trajectory timeout = duration x traj_timeout_factor + this (s)
+  traj_timeout_factor: 4.0 # the setpoint waits for the drone, so allow this many times the planned time
   turn_time_s: 4.0         # waypoints mode: allowance for turning at each waypoint (s)
   takeoff_wait_s: 8.0      # minimum wait after CMD_START before probing for hover (s)
   hover_radius_m: 0.10     # xy must stay within this radius to count as hovering (m)
@@ -68,7 +69,8 @@ flight:
   land_settle_s: 6.0       # after CMD_LAND, wait this long before calling the mission done (s)
 
 safety:
-  stale_timeout_s: 3.0         # abort-land if telemetry is older than this (s)
+  stale_timeout_s: 10.0        # abort-land if telemetry is older than this (s). The drone plays a
+                               # trajectory by itself, so short Wi-Fi gaps do not stop it flying
   geofence_margin_m: 0.5       # abort-land if outside area (+ home) grown by this (m)
   mission_time_limit_s: 600.0  # after this, stop searching, return and land (s)
 

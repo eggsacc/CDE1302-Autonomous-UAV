@@ -4,6 +4,7 @@ import csv
 import dataclasses
 import io
 import math
+import types
 import re
 
 import pytest
@@ -172,7 +173,7 @@ def test_stale_telemetry_triggers_abort_land(tmp_path):
     assert r.until(lambda: r.m.phase == Phase.EXPLORING, 300)
     r.drone.pause_telemetry()
     t0 = r.clock()
-    assert r.until(lambda: r.m.phase == Phase.ABORT_LANDING, 10)
+    assert r.until(lambda: r.m.phase == Phase.ABORT_LANDING, 15)
     assert r.clock() - t0 == pytest.approx(s.safety.stale_timeout_s, abs=0.3)
     assert "telemetry stale" in r.events("ABORT")[0]["details"]
     assert r.m.land_sent and r.m.exit_code == 1
@@ -512,6 +513,41 @@ def test_trajectory_start_is_retried_when_the_upload_is_lost(tmp_path):
     r.drone.settings = lossless
     assert r.until(lambda: r.events("TRAJ_STARTED"), 10)
     assert "attempt 3" in r.events("TRAJ_STARTED")[0]["details"]
+    r.m.command("land")
+    r.finish()
+
+
+def test_a_trajectory_that_never_finishes_times_out(tmp_path):
+    s = configure(tmp_path, flight={"traj_end_margin_s": 2.0, "traj_timeout_factor": 3.0})
+    r = Rig(s)
+    r.until(lambda: r.m.phase == Phase.READY, 5)
+    r.m.command("takeoff")
+    assert r.until(lambda: r.events("TRAJ_STARTED"), 80)
+    r.m.job.traj = types.SimpleNamespace(duration=1.0)       # still playing after 3 x 1 + 2 s
+    start = r.clock()
+    assert r.until(lambda: r.events("TRAJ_END"), 8)
+    assert "timeout" in r.events("TRAJ_END")[0]["details"]
+    assert r.clock() - start == pytest.approx(5.0, abs=2.0)
+    r.finish()
+
+
+def test_a_wifi_gap_does_not_use_up_trajectory_attempts(tmp_path):
+    r = Rig(configure(tmp_path), auto=False)
+    r.until(lambda: r.m.phase == Phase.READY, 5)
+    r.m.command("takeoff")
+    assert r.until(lambda: r.m.phase == Phase.HOVERING and r.m._hover_ok, 60)
+    uploads = []
+    send = r.drone.send_trajectory
+    r.drone.send_trajectory = lambda offsets, dt_ms: uploads.append(1) or send(offsets, dt_ms)
+    r.drone.pause_telemetry(True)
+    r.m.command("start")
+    r.step()
+    assert r.m.phase == Phase.EXPLORING
+    for _ in range(50):                                     # 5 s of silence, longer than the
+        r.step()                                            # 1.5 s start timeout
+    assert len(uploads) == 1 and r.m.phase == Phase.EXPLORING
+    r.drone.pause_telemetry(False)
+    assert r.until(lambda: r.events("TRAJ_STARTED"), 5)
     r.m.command("land")
     r.finish()
 
