@@ -128,7 +128,8 @@ bool mavlink_position_valid(void);
 // External position (CONFIG_UWB_SEND_TO_PX4)
 // ---------------------------------------------------------------------------
 
-// Newest aligned UWB fix: x/y in PX4 local NED metres, measured at t_us
-// (esp_timer).  mavlink_task sends the latest one in its 20 Hz loop.
-void mavlink_set_vision_position(float x, float y, uint64_t t_us);
+// Newest aligned UWB fix: x/y in PX4 local NED metres with their variance
+// (m^2), measured at t_us (esp_timer).  mavlink_task sends the latest one in
+// its 20 Hz loop.  PX4 uses the variance with EKF2_EV_NOISE_MD = 0.
+void mavlink_set_vision_position(float x, float y, float var_xy, uint64_t t_us);
 

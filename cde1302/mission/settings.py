@@ -178,6 +178,7 @@ class LiveMap:
 @dataclass(frozen=True)
 class Uwb:
     send_to_px4: bool = False
+    record: bool = False
     debug_port: int = 5010
     max_start_jump_m: float = 0.30
     align_solve_period_s: float = 1.0

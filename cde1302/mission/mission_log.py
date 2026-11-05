@@ -13,6 +13,8 @@ Each run gets its own folder, mission/logs/<YYYYmmdd_HHMMSS>/:
     trajectory.csv   drone pose at telemetry rate
     detections.csv   every accepted raw tag sighting
     tags_final.csv   the final tag report
+    uwb.csv          every UWB reading with PX4's position at that instant
+                     (only when uwb.record or uwb.send_to_px4 is on)
     config_used.yaml copy of the config this run used
 
 Times: `run_s` counts from when the log was opened, `mission_s` from the
@@ -51,6 +53,11 @@ DETECTION_FIELDS = (
     + ["pose_err", "decision_margin",
        "drone_x", "drone_y", "drone_heading_rad", "tag_x", "tag_y"]
 )
+
+# One UWB reading and PX4's position at the same moment, both from the drone.
+UWB_FIELDS = ["wall_time", "run_s", "mission_s", "esp_time_s",
+              "uwb_x", "uwb_y", "uwb_z", "eop_max", "fix",
+              "px4_x", "px4_y", "px4_age_ms"]
 
 TAGS_FINAL_FIELDS = ["tag_id", "x", "y", "n_sightings",
                      "first_seen_wall_time", "first_seen_mission_s",
@@ -144,6 +151,7 @@ class MissionLog:
         self._events = _CsvFile(folder / "events.csv", EVENT_FIELDS)
         self._traj = _CsvFile(folder / "trajectory.csv", TRAJECTORY_FIELDS)
         self._dets = _CsvFile(folder / "detections.csv", DETECTION_FIELDS)
+        self._uwb: _CsvFile | None = None          # opened on the first reading
         log.info("Logging this run to %s", folder)
 
     # -- time ---------------------------------------------------------------
@@ -222,6 +230,15 @@ class MissionLog:
                 self._traj.write({**self._times(t), "x": x, "y": y,
                                   "heading_rad": heading_rad, "nav_state": nav_state})
 
+    def uwb(self, t: float, **fields: Any) -> None:
+        """One UWB reading in uwb.csv (fields: the UWB_FIELDS after mission_s)."""
+        with self._lock:
+            if self._closed:
+                return
+            if self._uwb is None:
+                self._uwb = _CsvFile(self.folder / "uwb.csv", UWB_FIELDS)
+            self._uwb.write({**self._times(t), **fields})
+
     def detection(self, t: float, capture_t: float, **fields: Any) -> None:
         """One accepted tag sighting, in detections.csv.
 
@@ -266,8 +283,9 @@ class MissionLog:
         """Close every file; later writes are silently dropped."""
         with self._lock:
             self._closed = True
-            for f in (self._events, self._traj, self._dets):
-                f.close()
+            for f in (self._events, self._traj, self._dets, self._uwb):
+                if f is not None:
+                    f.close()
 
     def __enter__(self) -> "MissionLog":
         return self

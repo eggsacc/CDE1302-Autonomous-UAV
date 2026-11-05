@@ -17,14 +17,15 @@ from sim import ManualClock
 TICK = 0.1
 
 
-def configure(tmp_path, *, flight=None, safety=None, sim=None, tags=None, sweep=None):
+def configure(tmp_path, *, flight=None, safety=None, sim=None, tags=None, sweep=None,
+              uwb=None):
     """config.yaml with overrides.  sweep.start_at_home is off unless asked for:
     the sim's true tags are laid out in the area exactly as config.yaml writes it."""
     s = load_settings()
     s = dataclasses.replace(s, logging=dataclasses.replace(s.logging, log_dir=str(tmp_path)))
     sweep = {"start_at_home": False, "start_in_middle": False, **(sweep or {})}
     for name, kw in (("flight", flight), ("safety", safety), ("sim", sim), ("tags", tags),
-                     ("sweep", sweep)):
+                     ("sweep", sweep), ("uwb", uwb)):
         if kw:
             s = dataclasses.replace(s, **{name: dataclasses.replace(getattr(s, name), **kw)})
     return s
@@ -413,7 +414,8 @@ def test_trajectory_sweep_keeps_the_heading_and_covers_the_area(tmp_path):
     # The heading never changed after takeoff.
     assert max(abs(p.heading - h0) for p in r.drone.poses.snapshot()) < 1e-6
     # The camera looks straight down, so the plan stays where it is.
-    assert not r.events("PLAN_SHIFTED") and m.waypoints[0][0] == pytest.approx(0.2)
+    assert not r.events("PLAN_SHIFTED")
+    assert m.waypoints[0][0] == pytest.approx(s.area.x_min + s.area.margin)
     # One upload each for the sweep and the return, both played to the end.
     assert [e["details"].split(":")[0] for e in r.events("TRAJ_END")] == ["sweep", "return home"]
     assert all("done" in e["details"] for e in r.events("TRAJ_END"))
@@ -495,7 +497,7 @@ def test_camera_offset_moves_the_sweep_backwards(tmp_path):
     r.m.command("takeoff")
     assert r.until(lambda: r.m.phase == Phase.EXPLORING, 60)
     assert r.events("PLAN_SHIFTED")                        # drone faces North -> South
-    assert r.m.waypoints[0][0] == pytest.approx(0.2 - 0.6)
+    assert r.m.waypoints[0][0] == pytest.approx(s.area.x_min + s.area.margin - 0.6)
     r.m.command("land")
     r.finish()
 

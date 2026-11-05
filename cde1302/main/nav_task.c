@@ -47,7 +47,7 @@ static uint8_t    s_traj_id;       /* current upload id, 0 = none / already play
 static uint16_t   s_traj_dt_ms;
 static float      s_traj_org[3];   /* odom position where playback started        */
 static float      s_traj_yaw;
-static traj_gate_t s_traj_gate;    /* how far along the setpoint may go           */
+static traj_gate_t s_traj_gate;    /* where along the path the target is          */
 static int64_t    s_traj_tick_us;  /* esp_timer time of the previous traj_tick()  */
 
 /* ---------------------------------------------------------------------------
@@ -244,10 +244,21 @@ static int traj_next_corner(int from)
 }
 
 /* ---------------------------------------------------------------------------
- * Trajectory playback — linear interpolation between samples, with the
- * segment velocity as feedforward so PX4 tracks without lag.  The setpoint
- * eases to a stop as the drone falls CONFIG_TRAJ_LEASH_CM behind (traj_gate.h).
+ * Trajectory playback.  The target stays CONFIG_TRAJ_LOOKAHEAD_CM ahead of the
+ * drone along the path (traj_gate.h) and PX4 flies to it: a position target with
+ * no velocity, like a GOTO, so the speed comes from the steady gap.  With the
+ * lookahead at 0 it plays on the clock, with velocity feedforward.
  * --------------------------------------------------------------------------- */
+static void traj_point(float k, float *x, float *y, void *ctx)
+{
+    (void)ctx;
+    int i = (int)k;
+    if (i > s_traj_n - 2) i = s_traj_n - 2;
+    float a = k - (float)i;
+    *x = s_traj_org[0] + s_traj[i].x + a * (s_traj[i + 1].x - s_traj[i].x);
+    *y = s_traj_org[1] + s_traj[i].y + a * (s_traj[i + 1].y - s_traj[i].y);
+}
+
 static void traj_tick(void)
 {
     int64_t now_us = esp_timer_get_time();
@@ -258,24 +269,19 @@ static void traj_tick(void)
         s_traj_gate.corner = traj_next_corner((int)s_traj_gate.k);
     }
 
+    drone_state_t st = mavlink_get_state();
+    traj_gate_result_t step = traj_gate_step(&s_traj_gate, elapsed, st.x, st.y,
+                                             mavlink_position_valid(), traj_point, NULL);
+
     int   last = s_traj_n - 1;
     int   i    = (int)s_traj_gate.k;
     if (i > last - 1) i = last - 1;
     float a    = s_traj_gate.k - (float)i;
     const traj_pt_t *p0 = &s_traj[i], *p1 = &s_traj[i + 1];
-    float sp_x = s_traj_org[0] + p0->x + a * (p1->x - p0->x);
-    float sp_y = s_traj_org[1] + p0->y + a * (p1->y - p0->y);
+    float sp_x, sp_y;
+    traj_point(s_traj_gate.k, &sp_x, &sp_y, NULL);
     float sp_z = s_traj_org[2] + p0->z + a * (p1->z - p0->z);
 
-    drone_state_t st = mavlink_get_state();
-    float err = sqrtf((sp_x - st.x) * (sp_x - st.x) + (sp_y - st.y) * (sp_y - st.y));
-    traj_gate_result_t step = traj_gate_step(&s_traj_gate, elapsed, err,
-                                             mavlink_position_valid());
-
-    if (step == TRAJ_GATE_WAIT) {
-        mavlink_set_position_ned(sp_x, sp_y, sp_z, s_traj_yaw);
-        return;
-    }
     if (step == TRAJ_GATE_DONE) {
         const traj_pt_t *p = &s_traj[last];
         mavlink_set_position_ned(s_traj_org[0] + p->x, s_traj_org[1] + p->y,
@@ -291,11 +297,15 @@ static void traj_tick(void)
         return;
     }
 
-    float hz = s_traj_gate.rate * 1000.0f / (float)s_traj_dt_ms;
-    mavlink_set_position_velocity_ned(
-        sp_x, sp_y, sp_z,
-        (p1->x - p0->x) * hz, (p1->y - p0->y) * hz, (p1->z - p0->z) * hz,
-        s_traj_yaw);
+    if (CONFIG_TRAJ_LOOKAHEAD_CM > 0) {
+        mavlink_set_position_ned(sp_x, sp_y, sp_z, s_traj_yaw);
+    } else {
+        float hz = 1000.0f / (float)s_traj_dt_ms;
+        mavlink_set_position_velocity_ned(
+            sp_x, sp_y, sp_z,
+            (p1->x - p0->x) * hz, (p1->y - p0->y) * hz, (p1->z - p0->z) * hz,
+            s_traj_yaw);
+    }
 }
 
 /* ---------------------------------------------------------------------------
@@ -498,7 +508,7 @@ void nav_traj_start(uint8_t id, uint16_t dt_ms)
         s_traj_yaw    = st.heading;
         s_traj_dt_ms  = dt_ms;
         traj_gate_start(&s_traj_gate, s_traj_n, dt_ms / 1000.0f,
-                        CONFIG_TRAJ_LEASH_CM / 100.0f,
+                        CONFIG_TRAJ_LOOKAHEAD_CM / 100.0f,
                         CONFIG_TRAJ_CORNER_CM / 100.0f);
         s_traj_gate.corner = traj_next_corner(0);
         s_traj_tick_us = esp_timer_get_time();

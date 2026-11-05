@@ -437,7 +437,7 @@ class Mission:
             if self.use_trajectory:
                 self._shift_plan_for_camera(p.heading)
             self._move_plan_to_home()
-            if self.uwb is not None:
+            if self.uwb is not None and self.settings.uwb.send_to_px4:
                 self.uwb.begin()
                 self.log.event("UWB_COLLECTING", "pairing UWB and PX4 positions")
             if self.use_trajectory:
@@ -487,7 +487,8 @@ class Mission:
 
     def _tick_uwb(self, now: float) -> None:
         """uwb.send_to_px4: during the sweep, solve the alignment and deliver it."""
-        if (self.uwb is None or self.phase != Phase.EXPLORING or self._uwb_confirmed
+        if (self.uwb is None or not self.settings.uwb.send_to_px4
+                or self.phase != Phase.EXPLORING or self._uwb_confirmed
                 or now < self._uwb_next):
             return
         self._uwb_next = now + self.settings.uwb.align_solve_period_s
@@ -844,9 +845,10 @@ def build(settings: Settings, *, sim: bool = False, dry_run: bool = False,
         from tag_pipeline import TagPipeline
         drone = DroneLink(settings, dry_run=dry_run, clock=clock, on_command=on_command)
         source = TagPipeline(settings, drone, lambda: drone.esp_ip, on_sighting, clock=clock)
-        if settings.uwb.send_to_px4 and not dry_run:
+        if (settings.uwb.send_to_px4 and not dry_run) or settings.uwb.record:
             from uwb_feed import UwbFeed
-            uwb = UwbFeed(settings)
+            uwb = UwbFeed(settings, on_reading=(lambda **f: mlog.uwb(mlog.now(), **f))
+                          if settings.uwb.record else None)
     return Mission(settings, drone, source, tag_map, mlog,
                    waypoints=plan_waypoints(settings), auto=auto, echo=echo, uwb=uwb)
 

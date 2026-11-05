@@ -34,9 +34,9 @@ Everything is **off by default**: both firmware and laptop have a switch.
 | Parameter | Value | Why |
 |---|---|---|
 | `EKF2_EV_CTRL` | **1** | Horizontal position only |
-| `EKF2_EV_NOISE_MD` | **EV noise parameters** | The module's own precision estimate isn't reliable |
+| `EKF2_EV_NOISE_MD` | **EV reported variance** (0) | PX4 weights each reading by the precision the ESP32 sends, never trusting it more than `EKF2_EVP_NOISE` |
 | `EKF2_EVP_NOISE` | **0.15 m** | Your still test scattered 5–7 cm; flying adds more |
-| `EKF2_EVP_GATE` | 5.0 SD | Rejects big jumps |
+| `EKF2_EVP_GATE` | **3.0 SD** | Rejects readings that disagree by more than about 3x their expected error |
 | `EKF2_EV_DELAY` | **50 ms** | A starting guess, refine it from a flight log |
 | `EKF2_EV_POS_X` | **-0.04 m** | Antenna 4 cm behind the flight controller |
 | `EKF2_EV_POS_Y` | **0 m** | |
@@ -166,9 +166,12 @@ If no alignment is found, the sweep carries on without UWB, exactly as today.
   ESP32 sends PX4's own z back only because PX4 insists on a number; with
   `EKF2_EV_CTRL = 1` it's ignored.
 - **One alignment per flight.** It isn't refined during the flight.
-- **A fix only goes to PX4 if** the module reports `FIX`, x/y `eop` is at most
-  30 cm (`CONFIG_UWB_PX4_MAX_EOP_CM`), PX4's position is live, and the fix is
-  under 100 ms old.
+- **A reading goes to PX4 if** it has a real x/y position with x/y `eop` at
+  most 1 m (`CONFIG_UWB_PX4_MAX_EOP_CM`), PX4's position is live, and the
+  reading is under 100 ms old. The height and its precision are ignored. Each
+  reading's `eop` goes to PX4 as its variance, so PX4 trusts poor readings
+  less. Sending steadily matters: if readings stop for about 0.4 s, PX4 stops
+  UWB fusion, and when it restarts it jumps to the next reading unchecked.
 - **The laptop can drop out** after `UWB_ALIGN_CONFIRMED`. UWB keeps reaching
   PX4, but the 3 s telemetry safety check on the laptop still lands the drone.
 - **`uwb_sniff.py` and the mission can't run together**: both listen on UDP 5010.

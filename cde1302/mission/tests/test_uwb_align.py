@@ -163,7 +163,7 @@ def test_path_shape():
 def test_settings_section():
     s = load_settings()
     est = AlignmentEstimator.from_settings(s.uwb)
-    assert est.mirror == "auto" and est.min_samples == 50
+    assert est.mirror == s.uwb.mirror and est.min_samples == s.uwb.align_min_samples
     raw = dict(s.raw, uwb=dict(s.raw["uwb"], mirror="maybe"))
     with pytest.raises(ConfigError, match="uwb.mirror"):
         settings_from_dict(raw)

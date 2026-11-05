@@ -134,23 +134,26 @@ menu "Drone Configuration"
         help
           GPIO PX4 RX PIN
 
-    config TRAJ_LEASH_CM
-        int "Trajectory: setpoint stops if the drone is this far behind (cm)"
-        range 0 200
-        default 40
+    config TRAJ_LOOKAHEAD_CM
+        int "Trajectory: target distance ahead of the drone (cm)"
+        range 0 100
+        default 25
         help
-          The setpoint slows down from 60% of this distance and stops at it, so
-          the drone flies every lane and corner. Set well above the drone's
-          normal wander, or it will keep stopping.
-          0 = play on the clock, whether or not the drone keeps up.
+          The target stays this far ahead along the path. PX4's speed is about
+          MPC_XY_P x this distance, so this sets the flight speed: 25 cm is
+          about 0.24 m/s at the default gain. Longer is smoother and faster but
+          holds the line less tightly.
+          0 = play on the clock at the planned speed, whether or not the drone
+          keeps up.
 
     config TRAJ_CORNER_CM
         int "Trajectory: how close to get to each corner (cm)"
         range 0 100
-        default 12
+        default 15
         help
-          At each lane end and at the last point the setpoint stops until the
-          drone is this close. 0 = no stop at corners.
+          At each lane end and at the last point the target stops until the
+          drone is this close. Keep below the lookahead, or the drone will not
+          slow down for corners. 0 = no stop at corners.
 
     config CAMERA_STREAM_DEFAULT_FPS
         int "Camera preview default frame rate"
@@ -235,9 +238,12 @@ menu "UWB (LinkTrack)"
         int "Largest x/y eop sent to PX4 (cm)"
         depends on UWB_SEND_TO_PX4
         range 1 254
-        default 30
+        default 100
         help
-          Fixes whose x or y precision estimate is worse are not sent.
+          Readings whose x or y precision estimate is worse are not sent. Keep
+          it generous: gaps make PX4 restart UWB fusion and snap to the next
+          reading unchecked. Each reading's precision goes to PX4 as its
+          variance, so PX4 itself gives poor readings little weight.
 
     config UWB_DEBUG_PERIOD_MS
         int "Debug stream send period (ms)"

@@ -157,7 +157,8 @@ class FakeFeed:
 
 
 def rig(tmp_path, feed):
-    r = Rig(configure(tmp_path, flight={"stop_when_all_found": False}), uwb=feed)
+    r = Rig(configure(tmp_path, flight={"stop_when_all_found": False},
+                      uwb={"send_to_px4": True}), uwb=feed)
     r.until(lambda: r.m.phase == Phase.READY, 5)
     return r
 
@@ -218,6 +219,27 @@ def test_a_stale_ack_from_an_earlier_alignment_does_not_count(tmp_path):
     assert r.until(lambda: r.events("UWB_ALIGN_CONFIRMED"), 5)
     r.m.command("land")
     r.finish()
+
+
+def test_recording_only_never_sends_an_alignment(tmp_path):
+    feed = FakeFeed()
+    r = Rig(configure(tmp_path, flight={"stop_when_all_found": False},
+                      uwb={"send_to_px4": False, "record": True}), uwb=feed)
+    r.until(lambda: r.m.phase == Phase.READY, 5)
+    fly_until_exploring(r)
+    r.finish()
+    assert r.drone.uwb_alignments == [] and "solve" not in feed.calls
+    assert "begin" not in feed.calls and not r.events("UWB_COLLECTING")
+
+
+def test_every_reading_is_handed_to_the_recorder():
+    got = []
+    feed = UwbFeed(load_settings(), on_reading=lambda **f: got.append(f))
+    feed.feed_datagram(datagram(0, 1.0, 2.0))
+    feed.feed_datagram(datagram(1, 1.5, 2.5, px4=False))          # recorded, not paired
+    assert [g["uwb_x"] for g in got] == [pytest.approx(1.0), pytest.approx(1.5)]
+    assert got[0]["px4_x"] is not None and got[1]["px4_x"] is None
+    assert got[0]["fix"] == 1 and len(feed.estimator.samples) == 0   # not collecting
 
 
 def test_without_a_feed_nothing_changes(tmp_path):

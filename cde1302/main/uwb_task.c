@@ -311,7 +311,7 @@ static void feed_px4(const nlink_reading_t *r, int64_t t_us)
     if (use) {
         float px, py;
         uwb_xform_apply(&xf, r->pos[0], r->pos[1], &px, &py);
-        mavlink_set_vision_position(px, py, (uint64_t)t_us);
+        mavlink_set_vision_position(px, py, uwb_xy_variance(r), (uint64_t)t_us);
     }
     xSemaphoreTake(s_mutex, portMAX_DELAY);
     if (use) {

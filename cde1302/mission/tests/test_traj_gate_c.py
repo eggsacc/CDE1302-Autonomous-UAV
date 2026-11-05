@@ -1,11 +1,12 @@
-"""main/traj_gate.c: the setpoint waits for the drone instead of running on the clock.
+"""main/traj_gate.c: the target stays a fixed distance ahead of the drone.
 
-Compiled with the laptop's gcc, like test_nlink_c.py, and run against a simple
-drone that has a speed limit.
+Compiled with the laptop's gcc, like test_nlink_c.py, and flown against a simple
+PX4 model: a P position loop with a speed limit and a short lag.
 """
 
 import os
 import subprocess
+from collections import namedtuple
 from pathlib import Path
 
 import pytest
@@ -13,9 +14,8 @@ import pytest
 from test_nlink_c import CDE, _compiler
 
 SOURCES = [CDE / "main" / "traj_gate.c", Path(__file__).parent / "host_c" / "traj_gate_host_main.c"]
-MOVE, WAIT, DONE = 0, 1, 2
-TICK_S = 0.05
-POINTS, SAMPLE_S = 51, 0.2           # 10 s at 0.1 m/s = 1.0 m
+Run = namedtuple("Run", "done_s k x y end_err corner_err speed speed_std max_gap")
+GAIN = 0.95                          # PX4 default MPC_XY_P
 
 
 @pytest.fixture(scope="session")
@@ -25,7 +25,7 @@ def host(tmp_path_factory):
         pytest.skip("no C compiler (install the conda gcc: conda install -c conda-forge gcc)")
     exe = tmp_path_factory.mktemp("traj_gate_c") / ("traj_gate.exe" if os.name == "nt" else "traj_gate")
     cmd = [cc, "-std=c99", "-O2", "-Wall", "-Wextra", "-Werror", "-pedantic",
-           f"-I{CDE / 'main'}", *map(str, SOURCES), "-o", str(exe)]
+           f"-I{CDE / 'main'}", *map(str, SOURCES), "-o", str(exe), "-lm"]
     if os.name == "nt":
         cmd.insert(1, "-static")
     env = dict(os.environ, PATH=str(Path(cc).parent) + os.pathsep + os.environ.get("PATH", ""))
@@ -34,65 +34,62 @@ def host(tmp_path_factory):
     return exe
 
 
-def fly(exe, leash, max_speed, seconds, *extra):
-    out = subprocess.run([str(exe), str(POINTS), str(SAMPLE_S), str(leash), str(max_speed),
-                          str(int(seconds / TICK_S)), *map(str, extra)],
-                         capture_output=True, text=True, check=True).stdout.split()
-    return float(out[0]), float(out[1]), float(out[2]), int(out[3]), int(out[4])
+def fly(exe, lookahead=0.25, corner=0.15, max_speed=0.5, noise=0.0, seconds=60.0,
+        leg=2.0, leg2=0.0, freeze=None):
+    args = [lookahead, corner, GAIN, max_speed, noise, seconds, leg, leg2]
+    if freeze is not None:
+        args.append(freeze)
+    out = subprocess.run([str(exe), *map(str, args)], capture_output=True, text=True,
+                         check=True).stdout.split()
+    return Run(*map(float, out))
 
 
-def fly_corner(exe, leash, corner_m, corner_at, max_speed, seconds):
-    out = subprocess.run([str(exe), str(POINTS), str(SAMPLE_S), str(leash), str(max_speed),
-                          str(int(seconds / TICK_S)), "-1", str(corner_m), str(corner_at)],
-                         capture_output=True, text=True, check=True).stdout.split()
-    return float(out[1]), int(out[3]), int(out[4]), int(out[5]), float(out[6])
+def test_speed_is_about_gain_times_lookahead(host):
+    assert fly(host, lookahead=0.25).speed == pytest.approx(GAIN * 0.25, rel=0.1)
+    assert fly(host, lookahead=0.15).speed == pytest.approx(GAIN * 0.15, rel=0.1)
 
 
-def test_fast_drone_takes_the_planned_time(host):
-    k, drone, _, result, done_tick = fly(host, 0.25, 1.0, 12)
-    assert result == DONE
-    assert done_tick * TICK_S == pytest.approx(10.0, abs=0.3)
-    assert drone == pytest.approx(1.0, abs=0.03) and k == POINTS - 1
+def test_speed_is_steady(host):
+    assert fly(host).speed_std < 0.01
 
 
-def test_slow_drone_still_reaches_the_end(host):
-    # Half the commanded speed: the setpoint waits, and the drone flies all of it.
-    _, drone, max_err, result, done_tick = fly(host, 0.25, 0.05, 40)
-    assert result == DONE
-    assert drone >= 1.0 - 0.25
-    assert max_err <= 0.25 + 0.02                # never got further ahead than the leash
-    assert done_tick * TICK_S > 12.0             # took as long as it took
+def test_position_noise_barely_changes_the_speed(host):
+    # 5 cm wobble: the commanded speed varies by the wobble x gain, not by more.
+    r = fly(host, noise=0.05)
+    assert r.speed == pytest.approx(GAIN * 0.25, rel=0.2)
+    assert r.speed_std < 0.08
 
 
-def test_the_clock_runs_away_from_a_slow_drone(host):
-    # leash 0 = the old behaviour: "done" with the drone only halfway.
-    _, drone, _, result, done_tick = fly(host, 0.0, 0.05, 12)
-    assert result == DONE and done_tick * TICK_S == pytest.approx(10.0, abs=0.3)
-    assert drone < 0.65
+def test_a_speed_limit_only_lengthens_the_flight(host):
+    r = fly(host, max_speed=0.08, seconds=60)
+    assert r.done_s > 0 and r.end_err < 0.16
+    assert r.speed == pytest.approx(0.08, rel=0.1)
 
 
-def test_waits_forever_rather_than_guessing(host):
-    # A drone that cannot move: the setpoint stops at the leash and is never done.
-    k, drone, max_err, result, done_tick = fly(host, 0.25, 0.0, 300)
-    assert drone == 0.0 and result in (MOVE, WAIT) and done_tick == -1
-    assert k * SAMPLE_S * 0.1 == pytest.approx(0.25, abs=0.02)
+def test_finishes_only_at_the_last_point(host):
+    r = fly(host)
+    assert r.done_s > 0 and r.end_err < 0.16 and r.x == pytest.approx(2.0, abs=0.16)
 
 
-def test_setpoint_stops_on_a_corner_until_the_drone_is_close(host):
-    # Slow drone: up to 0.4 m behind on the lane, but within 5 cm at the corner.
-    drone, result, done, passed_tick, err_there = fly_corner(host, 0.4, 0.05, 25, 0.05, 40)
-    assert passed_tick > 0 and err_there <= 0.05
-    assert result == DONE
-    assert drone == pytest.approx(1.0, abs=0.06)       # the last point is a corner too
+def test_corner_is_reached_before_moving_on(host):
+    r = fly(host, leg=1.0, leg2=0.5, corner=0.10, seconds=60)
+    assert r.done_s > 0
+    assert 0 <= r.corner_err <= 0.10 + 0.02
 
 
-def test_a_corner_adds_only_a_short_wait_for_a_fast_drone(host):
-    plain = fly(host, 0.4, 1.0, 16)[4]
-    with_corner = fly_corner(host, 0.4, 0.05, 25, 1.0, 16)[2]
-    assert with_corner - plain < int(2.0 / TICK_S)
+def test_never_finishes_if_the_drone_cannot_move(host):
+    r = fly(host, max_speed=0.0, seconds=120)
+    assert r.done_s < 0 and r.x == 0.0
+    assert r.k * 0.02 == pytest.approx(0.25, abs=0.02)      # target waits a lookahead away
 
 
-def test_stale_position_stops_the_setpoint(host):
-    k_frozen = fly(host, 0.25, 1.0, 30, 40)[0]         # position stale from 2 s
-    assert k_frozen == pytest.approx(40 * TICK_S / SAMPLE_S, abs=1.0)
-    assert fly(host, 0.25, 1.0, 30, 40)[3] == WAIT
+def test_stale_position_stops_the_target(host):
+    healthy = fly(host, seconds=20)
+    frozen = fly(host, seconds=20, freeze=2.0)
+    assert frozen.done_s < 0 and frozen.k < healthy.k / 3
+
+
+def test_clock_mode_finishes_on_time_whatever_the_drone_does(host):
+    r = fly(host, lookahead=0.0, max_speed=0.05, seconds=25)      # 2 m at 0.1 m/s = 20 s
+    assert r.done_s == pytest.approx(20.0, abs=0.5)
+    assert r.x < 1.4

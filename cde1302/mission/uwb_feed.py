@@ -15,6 +15,9 @@ the result to the drone, which then feeds PX4 itself (main/uwb_task.c).
 
 Only the laptop needs this while aligning: after that the drone carries on
 without it, so losing Wi-Fi cannot stop UWB reaching PX4.
+
+on_reading, if given, is called for every decoded UWB reading (the mission
+writes them to uwb.csv), including flights that never send UWB to PX4.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ from __future__ import annotations
 import logging
 import socket
 import threading
-from typing import Optional
+from typing import Callable, Optional
 
 from nlink import NLinkParser, decode
 from settings import Settings
@@ -38,8 +41,10 @@ RECV_BUFFER = 2048              # larger than UWB_DBG_MAX_PACKET
 class UwbFeed:
     """Thread-safe bridge from the debug stream to the alignment estimator."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings,
+                 on_reading: Optional[Callable[..., None]] = None) -> None:
         self.settings = settings
+        self._on_reading = on_reading
         self.estimator = AlignmentEstimator.from_settings(settings.uwb)
         self.link = LinkStats()
         self._lock = threading.Lock()
@@ -101,11 +106,20 @@ class UwbFeed:
     def _add_record(self, rec) -> None:
         """Pair one record; called with the lock held."""
         u = self.settings.uwb
-        if rec.px4 is None or rec.px4_age_ms > u.align_max_px4_age_ms:
-            return
         frames = NLinkParser().feed(rec.frame)
         obj = decode(frames[0]) if frames else None
         if obj is None or not hasattr(obj, "pos"):
+            return
+        if self._on_reading is not None:
+            try:
+                self._on_reading(
+                    esp_time_s=rec.esp_time_us / 1e6, uwb_x=obj.pos[0], uwb_y=obj.pos[1],
+                    uwb_z=obj.pos[2], eop_max=max(obj.eop), fix=int(obj.pos_valid),
+                    px4_x=rec.px4[0] if rec.px4 else None,
+                    px4_y=rec.px4[1] if rec.px4 else None, px4_age_ms=rec.px4_age_ms)
+            except Exception:
+                log.exception("UWB reading callback failed")
+        if rec.px4 is None or rec.px4_age_ms > u.align_max_px4_age_ms:
             return
         sample = AlignSample(rec.esp_time_us / 1e6, obj.pos[0], obj.pos[1],
                              rec.px4[0], rec.px4[1], obj.pos_valid, max(obj.eop))

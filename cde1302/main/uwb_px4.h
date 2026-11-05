@@ -45,9 +45,16 @@ bool uwb_align_parse(const uint8_t *buf, size_t len, uwb_xform_t *out);
 /* UWB (x, y) in the anchor frame -> PX4 local (x = north, y = east). */
 void uwb_xform_apply(const uwb_xform_t *xf, float ux, float uy, float *px, float *py);
 
-/* May this reading be sent to PX4?  Needs a real fix and x/y precision within
- * max_eop_m.  z precision is not checked here: PX4 gets no height from UWB. */
+/* May this reading be sent to PX4?  Needs a real x/y position with x/y
+ * precision within max_eop_m.  The height and its precision are ignored (PX4
+ * gets no height from UWB): the module often reports "no fix" only because its
+ * z precision is at maximum, and dropping those leaves gaps that make PX4 stop
+ * and restart UWB fusion, snapping to whatever reading comes next.  How much to
+ * trust each reading is left to PX4, through uwb_xy_variance(). */
 bool uwb_reading_usable(const nlink_reading_t *r, float max_eop_m);
+
+/* Variance (m^2) of a reading's x/y position, from the module's precision. */
+float uwb_xy_variance(const nlink_reading_t *r);
 
 #ifdef __cplusplus
 }

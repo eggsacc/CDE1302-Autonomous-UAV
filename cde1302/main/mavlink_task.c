@@ -572,7 +572,7 @@ static void parse_incoming(void)
 #define VISION_MAX_AGE_US  100000   // never send a fix older than this
 
 static struct {
-    float    x, y;
+    float    x, y, var_xy;
     uint64_t t_us;
     bool     fresh;
 } s_vision;     // guarded by s_state_mutex
@@ -584,6 +584,7 @@ static void send_vision(void)
     s_vision.fresh = false;
     float x = s_vision.x;
     float y = s_vision.y;
+    float var_xy = s_vision.var_xy;
     uint64_t t_us = s_vision.t_us;
     float z = s_state.z;    // EKF2 needs a finite z; EKF2_EV_CTRL = 1 ignores it
     xSemaphoreGive(s_state_mutex);
@@ -593,6 +594,10 @@ static void send_vision(void)
     float q[4], pose_cov[21], vel_cov[21];
     for (int i = 0; i < 4; i++)  q[i] = NAN;
     for (int i = 0; i < 21; i++) pose_cov[i] = vel_cov[i] = NAN;
+    // Upper triangle, row by row: [0] = xx, [6] = yy, [11] = zz.  PX4 needs all
+    // three finite to use them; z is never fused (EKF2_EV_CTRL = 1).
+    pose_cov[0] = pose_cov[6] = var_xy;
+    pose_cov[11] = 100.0f;
 
     // ODOMETRY only exists in MAVLink 2.
     mavlink_get_channel_status(MAVLINK_COMM_0)->flags &= ~MAVLINK_STATUS_FLAG_OUT_MAVLINK1;
@@ -746,18 +751,20 @@ drone_state_t mavlink_get_state(void)
     return copy;
 }
 
-void mavlink_set_vision_position(float x, float y, uint64_t t_us)
+void mavlink_set_vision_position(float x, float y, float var_xy, uint64_t t_us)
 {
 #if CONFIG_UWB_SEND_TO_PX4
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     s_vision.x = x;
     s_vision.y = y;
+    s_vision.var_xy = var_xy;
     s_vision.t_us = t_us;
     s_vision.fresh = true;
     xSemaphoreGive(s_state_mutex);
 #else
     (void)x;
     (void)y;
+    (void)var_xy;
     (void)t_us;
 #endif
 }

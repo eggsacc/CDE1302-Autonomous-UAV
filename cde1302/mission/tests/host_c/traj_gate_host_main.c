@@ -1,64 +1,111 @@
 /*
- * Laptop test driver for main/traj_gate.c.  Flies a simulated drone along a
- * straight trajectory at a speed limit, and prints one line per run:
+ * Laptop test driver for main/traj_gate.c.  Flies a simulated PX4 (P position
+ * loop with a speed limit and a lag) along a path made of two straight legs:
+ * leg_m North, then leg2_m East, sampled every 0.02 m (planned 0.1 m/s).
  *
- *   traj_gate_host <points> <sample_s> <leash_m> <max_speed> <ticks> [freeze_tick]
- *                  [corner_m] [corner_sample]
+ *   traj_gate_host <lookahead_m> <corner_m> <gain> <max_speed> <noise_m> <seconds>
+ *                  <leg_m> <leg2_m> [freeze_s]
  *
- * The setpoint is at k * sample_s * 0.1 m along the line (0.1 m/s nominal).
- * From tick freeze_tick the simulated position stops being fresh.
- * With corner_sample the only corner is there, and the output gains
- * "<first tick k passed it> <error then>".
- * Output: "<k> <drone_m> <max_err_m> <result of the last tick> <done_tick>"
+ * noise_m adds position wobble to what the gate and the "PX4" see, like flow noise.
+ * From freeze_s the position stops being fresh.  With leg2_m = 0 there is no corner.
+ *
+ * Output: done_s k x y end_err corner_err mean_speed speed_std max_gap
+ *   corner_err: true distance to the corner when the target left it (-1 = never).
+ *   speeds are over the middle of the first leg.
  */
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 #include "traj_gate.h"
 
-#define TICK_S 0.05f
+#define TICK_S  0.05f
+#define SPACING 0.02f
+#define SAMPLE_S 0.2f
+
+static int s_n1;        /* sample of the corner */
+
+static void path(float k, float *x, float *y, void *ctx)
+{
+    (void)ctx;
+    if (k <= (float)s_n1) {
+        *x = k * SPACING;
+        *y = 0.0f;
+    } else {
+        *x = (float)s_n1 * SPACING;
+        *y = (k - (float)s_n1) * SPACING;
+    }
+}
+
+/* Small repeatable wobble with a period of a few seconds. */
+static float wobble(float t, float phase)
+{
+    return sinf(1.1f * t + phase) * 0.6f + sinf(2.7f * t + 2.0f * phase) * 0.4f;
+}
 
 int main(int argc, char **argv)
 {
-    if (argc < 6) return 2;
-    int n = atoi(argv[1]);
-    float sample_s = (float)atof(argv[2]);
-    float leash = (float)atof(argv[3]);
-    float max_speed = (float)atof(argv[4]);
-    int ticks = atoi(argv[5]);
-    int freeze = argc > 6 ? atoi(argv[6]) : -1;
+    if (argc < 9) return 2;
+    float lookahead = (float)atof(argv[1]), corner_m = (float)atof(argv[2]);
+    float gain = (float)atof(argv[3]), max_speed = (float)atof(argv[4]);
+    float noise = (float)atof(argv[5]), seconds = (float)atof(argv[6]);
+    float leg = (float)atof(argv[7]), leg2 = (float)atof(argv[8]);
+    float freeze = argc > 9 ? (float)atof(argv[9]) : -1.0f;
 
-    float corner_m = argc > 7 ? (float)atof(argv[7]) : 0.0f;
-    int corner_at = argc > 8 ? atoi(argv[8]) : -1;
+    s_n1 = (int)(leg / SPACING + 0.5f);
+    int n = s_n1 + (int)(leg2 / SPACING + 0.5f) + 1;
 
     traj_gate_t g;
-    traj_gate_start(&g, n, sample_s, leash, corner_m);
-    if (corner_at >= 0) g.corner = corner_at;
-    int passed_tick = -1;
-    float passed_err = 0.0f;
-    float drone = 0.0f, max_err = 0.0f;
-    int done_tick = -1;
-    traj_gate_result_t res = TRAJ_GATE_WAIT;
+    traj_gate_start(&g, n, SAMPLE_S, lookahead, corner_m);
+    if (leg2 > 0.0f && corner_m > 0.0f) g.corner = s_n1;
 
-    for (int t = 0; t < ticks; t++) {
-        float sp = g.k * sample_s * 0.1f;
-        float err = sp - drone;
-        if (err > max_err) max_err = err;
-        res = traj_gate_step(&g, TICK_S, err, freeze < 0 || t < freeze);
-        if (g.corner < 0) g.corner = n - 1;              /* what nav_task finds next */
-        if (corner_at >= 0 && passed_tick < 0 && g.k > (float)corner_at) {
-            passed_tick = t;
-            passed_err = err;
+    float x = 0, y = 0, vx = 0, vy = 0, done_s = -1, corner_err = -1, max_gap = 0;
+    float sum = 0, sum2 = 0, prev_x = 0;
+    int count = 0;
+
+    for (int i = 0; i * TICK_S < seconds; i++) {
+        float t = (float)i * TICK_S;
+        float nx = x + noise * wobble(t, 0.0f), ny = y + noise * wobble(t, 1.3f);
+        bool fresh = freeze < 0.0f || t < freeze;
+        bool at_corner = g.corner == s_n1 && g.k >= (float)s_n1;
+        traj_gate_result_t r = traj_gate_step(&g, TICK_S, nx, ny, fresh, path, NULL);
+        if (at_corner && g.corner < 0 && corner_err < 0.0f) {
+            corner_err = sqrtf((x - leg) * (x - leg) + y * y);
         }
-        if (res == TRAJ_GATE_DONE) {
-            if (done_tick < 0) done_tick = t;
-            continue;
+        if (g.corner < 0) g.corner = n - 1;           /* what nav_task finds next */
+        if (r == TRAJ_GATE_DONE && done_s < 0.0f) done_s = t;
+
+        float tx, ty;
+        path(g.k, &tx, &ty, NULL);
+        float gap = sqrtf((tx - x) * (tx - x) + (ty - y) * (ty - y));
+        if (gap > max_gap) max_gap = gap;
+
+        float cx = gain * (tx - nx), cy = gain * (ty - ny);
+        float c = sqrtf(cx * cx + cy * cy);
+        if (c > max_speed && c > 0.0f) {
+            cx *= max_speed / c;
+            cy *= max_speed / c;
         }
-        float step = err * 1.0f + 0.1f;                  /* P loop + feedforward */
-        if (step > max_speed) step = max_speed;
-        drone += step * TICK_S;
+        vx += (cx - vx) * 0.25f;                      /* about 0.2 s response */
+        vy += (cy - vy) * 0.25f;
+        x += vx * TICK_S;
+        y += vy * TICK_S;
+
+        if (x > 0.25f * leg && x < 0.75f * leg && i % 10 == 0) {
+            float v = (x - prev_x) / (10.0f * TICK_S);
+            sum += v;
+            sum2 += v * v;
+            count++;
+        }
+        if (i % 10 == 0) prev_x = x;
     }
-    printf("%.4f %.4f %.4f %d %d %d %.4f\n", (double)g.k, (double)drone, (double)max_err,
-           (int)res, done_tick, passed_tick, (double)passed_err);
+    float mean = count ? sum / (float)count : 0.0f;
+    float var = count ? sum2 / (float)count - mean * mean : 0.0f;
+    float tx, ty;
+    path((float)g.last, &tx, &ty, NULL);
+    float end_err = sqrtf((x - tx) * (x - tx) + (y - ty) * (y - ty));
+    printf("%.3f %.3f %.3f %.3f %.3f %.3f %.4f %.4f %.3f\n", (double)done_s, (double)g.k,
+           (double)x, (double)y, (double)end_err, (double)corner_err, (double)mean,
+           (double)sqrtf(var > 0.0f ? var : 0.0f), (double)max_gap);
     return 0;
 }

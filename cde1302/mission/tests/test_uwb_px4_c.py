@@ -79,7 +79,8 @@ def test_c_refuses_bad_datagrams(host):
 @pytest.mark.parametrize("line,expected", [
     ("U 1 1 0.10 0.10 0.10 0.30", "1"),
     ("U 1 1 0.30 0.30 2.50 0.30", "1"),          # z precision does not matter
-    ("U 1 0 0.10 0.10 0.10 0.30", "0"),          # no fix
+    ("U 1 0 0.10 0.10 2.55 0.30", "1"),          # "no fix" only because of z: still sent
+    ("U 1 0 2.55 2.55 2.55 2.54", "0"),          # no x/y estimate at all
     ("U 0 1 0.10 0.10 0.10 0.30", "0"),          # no position in the frame
     ("U 1 1 0.31 0.10 0.10 0.30", "0"),
     ("U 1 1 0.10 0.31 0.10 0.30", "0"),
