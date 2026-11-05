@@ -178,7 +178,7 @@ menu "UWB (LinkTrack)"
         default n
         help
           Starts uwb_task (main/uwb_task.c). Off: the firmware is exactly as
-          without UWB. See mission/UWB_ESP32_BENCH_TEST.md.
+          without UWB. See laptop/UWB_README.md.
 
     config UWB_RX_PIN
         int "ESP32 GPIO wired to the module's TX (-1 = not set)"
@@ -216,7 +216,7 @@ menu "UWB (LinkTrack)"
         depends on UWB_ENABLED
         default y
         help
-          Sent to HOST_IPV4_ADDR. Read with: python mission/tools/uwb_sniff.py --udp 5010
+          Sent to HOST_IPV4_ADDR. Read by laptop/simple_uwb_calibration.py
 
     config UWB_DEBUG_PORT
         int "Laptop UDP port for the UWB debug stream"
@@ -232,7 +232,7 @@ menu "UWB (LinkTrack)"
           Once the laptop has sent an alignment (CMD_UWB_ALIGN), send each good
           UWB fix to PX4 as position-only ODOMETRY in MAV_FRAME_LOCAL_FRD, and
           answer PX4's TIMESYNC requests. The alignment needs the debug stream.
-          PX4 needs EKF2_EV_CTRL = 1. See mission/UWB_PX4_FLIGHT_TEST.md.
+          PX4 needs EKF2_EV_CTRL = 1. See laptop/UWB_README.md.
 
     config UWB_PX4_MAX_EOP_CM
         int "Largest x/y eop sent to PX4 (cm)"

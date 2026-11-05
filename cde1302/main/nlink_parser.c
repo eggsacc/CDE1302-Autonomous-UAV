@@ -1,7 +1,7 @@
 /*
- * nlink_parser.c — see nlink_parser.h.  Mirrors mission/nlink.py exactly
+ * nlink_parser.c — see nlink_parser.h.  Mirrors the LinkTrack NLink V1.4 spec
  * (same frame table, resync rule, checksum rules and no-fix rule) so the
- * laptop and the drone agree byte for byte; mission/tests/test_nlink_c.py
+ * laptop and the drone agree byte for byte; it was tested against a laptop parser
  * checks that on a real capture and on corrupted streams.
  */
 #include "nlink_parser.h"
@@ -11,7 +11,7 @@
 
 /* ---------------------------------------------------------------------------
  * Frame table: (header, function mark) -> kind, fixed length (0 = uint16
- * length field at bytes 2..3).  Same as FRAME_TYPES in mission/nlink.py.
+ * length field at bytes 2..3).  Frame types from NLink V1.4.
  * ------------------------------------------------------------------------- */
 typedef struct {
     uint8_t      header;

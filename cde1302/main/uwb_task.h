@@ -3,16 +3,16 @@
  * uwb_task — reads a Nooploop LinkTrack UWB tag on UART2 (RX only) and decodes
  * its NLink frames with nlink_parser.c.
  *
- * Bench-test stage (see mission/UWB_ESP32_BENCH_TEST.md):
+ * What it does (see laptop/UWB_README.md):
  *   - serial monitor: throughput, error counters and the newest decoded frame
  *     every CONFIG_UWB_LOG_PERIOD_MS;
  *   - CONFIG_UWB_DEBUG_UDP: every raw frame, paired with PX4's local position
  *     at that instant, plus all counters, streamed to the laptop
  *     (CONFIG_HOST_IPV4_ADDR : CONFIG_UWB_DEBUG_PORT) in the format of
- *     uwb_debug_pack.h; read with mission/tools/uwb_sniff.py --udp.
+ *     uwb_debug_pack.h; read by laptop/simple_uwb_calibration.py.
  *   - CONFIG_UWB_SEND_TO_PX4: once the laptop has sent an alignment, every
  *     good fix goes to PX4 as ODOMETRY (uwb_px4.h, mavlink_task.c).  Off by
- *     default; see mission/UWB_PX4_FLIGHT_TEST.md.
+ *     default; see laptop/UWB_README.md.
  *
  * The task starts before Wi-Fi (which blocks until connected), so the serial
  * log works with no router; the UDP stream begins once Wi-Fi is up.

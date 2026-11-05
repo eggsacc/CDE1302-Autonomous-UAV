@@ -22,5 +22,9 @@ venv/
 # macOS
 .DS_Store
 
-# Bench-only firmware settings applied by flash_drone.sh (see mission/UWB_ESP32_BENCH_TEST.md)
+# Bench-only firmware settings applied by flash_drone.sh (see laptop/UWB_README.md)
 sdkconfig.local
+
+# Old mission flight logs and test scratch (kept locally, never committed)
+mission/
+laptop/uwb_calibration.json

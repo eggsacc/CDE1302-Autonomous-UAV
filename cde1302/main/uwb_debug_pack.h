@@ -1,9 +1,8 @@
 /*
  * uwb_debug_pack — byte layout of the UWB debug stream (ESP32 → laptop UDP).
  *
- * Pure C99 (no ESP-IDF) so the layout is tested on the laptop against the
- * Python reader mission/uwb_link.py (mission/tests/test_uwb_link.py).
- * Change both together and bump UWB_DBG_VERSION.
+ * Pure C99 (no ESP-IDF).  The Python reader is parse_debug_packet() in
+ * laptop/simple_uwb_calibration.py: change both together and bump UWB_DBG_VERSION.
  *
  * All multi-byte fields little-endian.  One UDP packet =
  *

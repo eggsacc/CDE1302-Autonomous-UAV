@@ -1,9 +1,8 @@
 /*
  * uwb_px4 — turn a UWB reading into a position in PX4's local frame.
  *
- * The laptop works out the alignment (mission/uwb_align.py) and sends it with
- * CMD_UWB_ALIGN; this file holds the parts that need no ESP-IDF, so they are
- * tested on the laptop against the Python side (mission/tests/test_uwb_px4_c.py):
+ * The laptop works out the alignment (laptop/simple_uwb_calibration.py) and sends it with
+ * CMD_UWB_ALIGN; this file holds the parts that need no ESP-IDF:
  *
  *   p = R(theta) @ M @ u + t,  M = diag(1, -1) if mirror, else identity
  *

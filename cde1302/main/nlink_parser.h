@@ -1,9 +1,8 @@
 /*
  * nlink_parser — Nooploop NLink (LinkTrack UWB) frame finding and decoding.
  *
- * Pure C99, no ESP-IDF: the same file is compiled on the laptop and tested
- * against mission/nlink.py (mission/tests/test_nlink_c.py), on a real capture
- * from a LinkTrack P-A and on corrupted streams.  Keep the two in step.
+ * Pure C99, no ESP-IDF.  It was checked against a laptop parser on a real
+ * capture from a LinkTrack P-A and on corrupted streams.
  *
  * Layout: UWB_documentation/NLink_V1.4.pdf.  Little-endian (confirmed on a
  * real P-A: supply voltage decodes to ~4.9 V, local_time steps 20 ms).
@@ -29,7 +28,7 @@ extern "C" {
  * length-field frames <= NLINK_MAX_VAR_LEN). */
 #define NLINK_BUF_SIZE      2048
 #define NLINK_MIN_VAR_LEN   7
-#define NLINK_MAX_VAR_LEN   1024     /* same bound as mission/nlink.py MAX_VAR_LEN */
+#define NLINK_MAX_VAR_LEN   1024     /* longest variable-length frame accepted */
 #define NLINK_MAX_ANCHORS   16       /* per decoded frame; extra blocks are counted */
 
 typedef enum {
@@ -48,7 +47,7 @@ typedef enum {
     NLINK_KIND_COUNT
 } nlink_kind_t;
 
-/* Name as used by mission/nlink.py, e.g. "NODE_FRAME2". */
+/* Frame name, e.g. "NODE_FRAME2". */
 const char *nlink_kind_name(nlink_kind_t kind);
 
 typedef struct {

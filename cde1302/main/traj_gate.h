@@ -1,8 +1,7 @@
 /*
  * traj_gate — decides where along an uploaded trajectory the target goes.
  *
- * Pure C99 (no ESP-IDF), so it is tested on the laptop
- * (mission/tests/test_traj_gate_c.py).
+ * Pure C99 (no ESP-IDF).
  *
  * The target sits lookahead_m ahead of the drone along the path.  PX4 flies at
  * about gain x gap, so a constant gap gives a steady speed, and a position wobble
