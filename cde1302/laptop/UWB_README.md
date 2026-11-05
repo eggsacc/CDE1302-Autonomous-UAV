@@ -138,6 +138,41 @@ Goals more than 4 m away are refused (`--max-distance`).
 The hand-worked theta is only as good as the nose alignment (1° ≈ 1.7 cm per
 metre), so the calibration square is more accurate.
 
+## UWB as the coordinate system: `simple_uwb_frame_goal.py`
+
+No calibration flight and no offset. On the ground, before takeoff, the ESP32
+starts sending the raw UWB position to PX4 (rotation from `--nose-deg`, mirror,
+t = 0). PX4 moves its position onto it, and from then on **PX4's position is
+the UWB position**: PX4 x = UWB x, PX4 y = −UWB y. The script won't take off
+until PX4 has sat within 0.15 m of UWB for 2 s.
+
+```bash
+python simple_uwb_frame_goal.py --drone-id 2 --goal 2.0 1.5 --confirm
+```
+
+**What it needs from you:** power up PX4 with the nose pointing along a known
+UWB direction, because PX4's heading 0 is the nose direction at power-up.
+`--nose-deg 0` (default) means along UWB +x (A0 → A3 in the usual layout),
+90 means along +y, and 180 means along −x. A wrong nose angle can't be seen on
+the ground: positions are right where the drone stands but get worse with
+distance (about 1.7 cm per metre per degree). If it's off, PX4's optical flow
+and UWB disagree in flight, so it can wobble or drift. The calibration square
+measures the angle instead of trusting it.
+
+**Compared with the calibration method:**
+
+| | `simple_uwb_frame_goal.py` | `simple_uwb_set_goal.py` |
+|---|---|---|
+| Coordinate system | UWB (anchors) from the ground | PX4 (power-up spot), UWB aligned into it |
+| Before the goal | nothing | calibration square, or saved / typed alignment |
+| Heading | must be lined up by hand | measured by the square |
+| PX4 position | jumps to UWB on the ground | starts at 0, no jump |
+
+**Firmware:** the alignment is now cleared before each READY instead of on
+`CMD_START`, so one sent on the ground is kept for that flight. After
+`CMD_START` the hold position is captured again, so OFFBOARD doesn't start on
+the pre-UWB spot. Reflash for this script; the other scripts work either way.
+
 ## Settings
 
 **Firmware** (`idf.py menuconfig` → UWB (LinkTrack)):

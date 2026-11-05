@@ -73,6 +73,80 @@ def line_path(start, goal, speed: float) -> np.ndarray:
     return np.column_stack([xy, np.zeros(len(xy))])
 
 
+class Drone:
+    """Telemetry, trajectory flying and landing for one drone."""
+
+    def __init__(self, comms: CommsNode, drone_id: int):
+        self.comms, self.id = comms, drone_id
+        self.pkt = None
+        comms.on_telemetry(self._on_telemetry)
+
+    def _on_telemetry(self, pkt, _ip) -> None:
+        if pkt.drone_id == self.id:
+            self.pkt = pkt
+
+    def pos(self) -> tuple[float, float]:
+        return self.pkt.ned_x, self.pkt.ned_y
+
+    def wait_for(self, cond, timeout_s: float) -> bool:
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if self.pkt is not None and cond(self.pkt):
+                return True
+            time.sleep(0.05)
+        return False
+
+    def fly(self, pts: np.ndarray, name: str) -> None:
+        """Upload a trajectory, start it and wait until the ESP32 reports it done."""
+        traj_id = random.randint(1, 255)
+        packets = build_traj_packets(traj_id, pts)
+        start = build_traj_start(traj_id, round(DT_S * 1000))
+        for attempt in range(1, 6):
+            for pkt in packets:
+                self.comms.send_raw(self.id, pkt)
+                time.sleep(UPLOAD_GAP_S)
+            self.comms.send_raw(self.id, start)
+            if self.wait_for(lambda p: p.nav_state == NAV_TRAJ, 1.5):
+                break
+            log.warning("%s attempt %d: not started (see ESP log)", name, attempt)
+        else:
+            raise RuntimeError(f"drone refused the {name}")
+        end = time.monotonic() + 4 * len(pts) * DT_S + 15.0   # the ESP waits for a slow drone
+        while self.pkt.nav_state == NAV_TRAJ and time.monotonic() < end:
+            log.info("%s: pos (%+.2f, %+.2f)", name, *self.pos())
+            time.sleep(1.0)
+        log.info("%s done, nav state %s", name, self.pkt.nav_state_name)
+
+    def start(self) -> None:
+        self.comms.send_command(self.id, CommandPacket(CMD_START))
+
+    def land(self) -> None:
+        for _ in range(3):
+            self.comms.send_command(self.id, CommandPacket(CMD_LAND))
+            time.sleep(0.1)
+        log.info("CMD_LAND sent")
+
+
+def hover_and_report(uwb: UwbPairs, goal_uwb, hover_s: float, extra: str = "") -> None:
+    """Average UWB at the goal for hover_s and print the error (before landing)."""
+    readings = []
+    end = time.monotonic() + hover_s
+    while time.monotonic() < end:
+        if uwb.latest is not None:
+            readings.append(uwb.latest[:2])
+        time.sleep(0.1)
+    if not readings:
+        print("\nno UWB readings at the goal: no error measured")
+        return
+    mean = np.mean(readings, axis=0)
+    print("\n=== UWB goal ===")
+    print(f"goal       ({goal_uwb[0]:.2f}, {goal_uwb[1]:.2f}) m, UWB coordinates")
+    print(f"reached    ({mean[0]:.2f}, {mean[1]:.2f}) m, UWB average over {len(readings)} readings")
+    print(f"error      {math.dist(mean, goal_uwb):.3f} m")
+    if extra:
+        print(extra)
+
+
 def alignment_from_args(args) -> dict | None:
     given = [args.theta, args.mirror, args.tx, args.ty]
     if any(v is not None for v in given):
@@ -112,56 +186,14 @@ def main() -> None:
     args = ap.parse_args()
     alignment = alignment_from_args(args)
 
-    latest = {}
-
-    def on_telemetry(pkt, _ip):
-        if pkt.drone_id == args.drone_id:
-            latest["pkt"] = pkt
-
-    def wait_for(cond, timeout_s: float) -> bool:
-        deadline = time.monotonic() + timeout_s
-        while time.monotonic() < deadline:
-            if "pkt" in latest and cond(latest["pkt"]):
-                return True
-            time.sleep(0.05)
-        return False
-
-    def fly(pts: np.ndarray, name: str) -> None:
-        """Upload a trajectory, start it and wait until the ESP32 reports it done."""
-        traj_id = random.randint(1, 255)
-        packets = build_traj_packets(traj_id, pts)
-        start = build_traj_start(traj_id, round(DT_S * 1000))
-        for attempt in range(1, 6):
-            for pkt in packets:
-                comms.send_raw(args.drone_id, pkt)
-                time.sleep(UPLOAD_GAP_S)
-            comms.send_raw(args.drone_id, start)
-            if wait_for(lambda p: p.nav_state == NAV_TRAJ, 1.5):
-                break
-            log.warning("%s attempt %d: not started (see ESP log)", name, attempt)
-        else:
-            raise RuntimeError(f"drone refused the {name}")
-        end = time.monotonic() + 4 * len(pts) * DT_S + 15.0   # the ESP waits for a slow drone
-        while latest["pkt"].nav_state == NAV_TRAJ and time.monotonic() < end:
-            p = latest["pkt"]
-            log.info("%s: pos (%+.2f, %+.2f)", name, p.ned_x, p.ned_y)
-            time.sleep(1.0)
-        log.info("%s done, nav state %s", name, latest["pkt"].nav_state_name)
-
-    def land() -> None:
-        for _ in range(3):
-            comms.send_command(args.drone_id, CommandPacket(CMD_LAND))
-            time.sleep(0.1)
-        log.info("CMD_LAND sent")
-
     uwb = UwbPairs(args.uwb_port)
     comms = CommsNode(listen_port=args.telem_port, cmd_port=args.cmd_port)
-    comms.on_telemetry(on_telemetry)
+    drone = Drone(comms, args.drone_id)
     comms.start()
     uwb.start()
     flying = False
     try:
-        if not wait_for(lambda p: True, 30.0):
+        if not drone.wait_for(lambda p: True, 30.0):
             raise RuntimeError(f"no telemetry from drone {args.drone_id}")
         time.sleep(2.0)
         if uwb.latest is None:
@@ -171,7 +203,7 @@ def main() -> None:
             log.info("cancelled")
             return
 
-        comms.send_command(args.drone_id, CommandPacket(CMD_START))
+        drone.start()
         flying = True
         log.info("CMD_START sent, waiting %.0f s for the hover", args.takeoff_wait)
         time.sleep(args.takeoff_wait)
@@ -179,7 +211,7 @@ def main() -> None:
         if alignment is None:
             log.info("no alignment given: flying a %.1f m calibration square", args.size)
             uwb.recording = True
-            fly(square_path(args.size, args.speed, args.side), "calibration square")
+            drone.fly(square_path(args.size, args.speed, args.side), "calibration square")
             uwb.recording = False
             if len(uwb.pairs) < MIN_PAIRS:
                 raise RuntimeError(f"only {len(uwb.pairs)} usable UWB/PX4 pairs")
@@ -200,37 +232,26 @@ def main() -> None:
         send_alignment(comms, args.drone_id, {**alignment, "rms_m": alignment.get("rms_m", 0.0)})
         time.sleep(1.0)                                     # let PX4 take UWB in
 
-        here = (latest["pkt"].ned_x, latest["pkt"].ned_y)
+        here = drone.pos()
         goal = to_px4(alignment, *args.goal)
         dist = math.dist(here, goal)
         log.info("goal UWB (%.2f, %.2f) = PX4 (%+.2f, %+.2f), %.2f m away",
                  *args.goal, *goal, dist)
         if dist > args.max_distance:
             raise RuntimeError(f"goal {dist:.1f} m away (> --max-distance {args.max_distance})")
-        fly(line_path(here, goal, args.speed), "goal")
+        drone.fly(line_path(here, goal, args.speed), "goal")
 
-        readings = []
-        end = time.monotonic() + args.hover
-        while time.monotonic() < end:
-            if uwb.latest is not None:
-                readings.append(uwb.latest[:2])
-            time.sleep(0.1)
-        land()
+        fit = ""
+        if "rms_m" in alignment:
+            poor = "  POOR FIT (over 0.10 m)" if alignment["rms_m"] > 0.10 else ""
+            fit = f"fit rms    {alignment['rms_m']:.3f} m{poor}"
+        hover_and_report(uwb, args.goal, args.hover, fit)
+        drone.land()
         flying = False
-        if readings:
-            mean = np.mean(readings, axis=0)
-            err = math.dist(mean, args.goal)
-            print("\n=== UWB goal ===")
-            print(f"goal       ({args.goal[0]:.2f}, {args.goal[1]:.2f}) m, UWB coordinates")
-            print(f"reached    ({mean[0]:.2f}, {mean[1]:.2f}) m, UWB average over {len(readings)} readings")
-            print(f"error      {err:.3f} m")
-            if "rms_m" in alignment:
-                poor = "  POOR FIT (over 0.10 m)" if alignment["rms_m"] > 0.10 else ""
-                print(f"fit rms    {alignment['rms_m']:.3f} m{poor}")
     except (Exception, KeyboardInterrupt):
         if flying:
             log.error("aborted - landing")
-            land()
+            drone.land()
         raise
     finally:
         uwb.stop()

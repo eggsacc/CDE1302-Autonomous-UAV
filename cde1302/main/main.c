@@ -64,6 +64,8 @@ static void mission_task(void *arg)
     nav_cancel();                 /* drop stale goal + commands */
     wifi_clear_start_request();
     wifi_clear_land_request();
+    uwb_clear_alignment();        /* never fly on a previous flight's alignment;
+                                   * one sent from here on (ground) is kept */
     wifi_set_mission_phase(MISSION_READY);
     ESP_LOGI(TAG, "Pre-streaming hold setpoint for 2 s...");
     vTaskDelay(pdMS_TO_TICKS(2000));
@@ -77,6 +79,9 @@ static void mission_task(void *arg)
     }
     wifi_clear_start_request();
     ESP_LOGI(TAG, "CMD_START received");
+    /* Re-capture the hold: a UWB alignment sent on the ground moves PX4's
+     * position, and OFFBOARD must not start on the old spot. */
+    mavlink_set_hold();
 
     /* Pre-arm: refuse to arm until all ToF sensors are up. */
 #if TOF_ENABLED
