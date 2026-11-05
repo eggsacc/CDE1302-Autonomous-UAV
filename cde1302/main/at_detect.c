@@ -121,6 +121,45 @@ static camera_config_t camera_config = {
     .grab_mode = CAMERA_GRAB_LATEST,
 };
 
+/* Fixed exposure (less motion blur) and gain from menuconfig; 0 = auto. */
+static void apply_exposure(sensor_t *s)
+{
+    if (CONFIG_CAMERA_EXPOSURE_LINES > 0) {
+        s->set_exposure_ctrl(s, 0);
+        s->set_aec_value(s, CONFIG_CAMERA_EXPOSURE_LINES);
+    }
+    if (CONFIG_CAMERA_GAIN > 0) {
+        s->set_gain_ctrl(s, 0);
+        s->set_agc_gain(s, CONFIG_CAMERA_GAIN);
+    } else {
+        s->set_gain_ctrl(s, 1);
+        s->set_gainceiling(s, GAINCEILING_128X);
+    }
+    ESP_LOGI(TAG, "camera: exposure %s, gain %s",
+             CONFIG_CAMERA_EXPOSURE_LINES > 0 ? "fixed" : "auto",
+             CONFIG_CAMERA_GAIN > 0 ? "fixed" : "auto (ceiling 128x)");
+}
+
+/* Every 5 s: what the sensor is actually using (OV3660 registers), so a
+ * fixed exposure can be chosen from what auto exposure picks. */
+static void log_exposure(void)
+{
+    static int64_t last_us;
+    int64_t now = esp_timer_get_time();
+    if (now - last_us < 5000000) return;
+    last_us = now;
+    sensor_t *s = esp_camera_sensor_get();
+    if (s == NULL || s->id.PID != OV3660_PID || s->get_reg == NULL) return;
+    int e0 = s->get_reg(s, 0x3500, 0xFF), e1 = s->get_reg(s, 0x3501, 0xFF);
+    int e2 = s->get_reg(s, 0x3502, 0xFF), vts = s->get_reg(s, 0x380e, 0xFFFF);
+    int g  = s->get_reg(s, 0x350a, 0xFFFF);
+    if (e0 < 0 || e1 < 0 || e2 < 0 || vts < 0 || g < 0) return;
+    int lines = ((e0 & 0x0F) << 12) | (e1 << 4) | (e2 >> 4);
+    ESP_LOGI(TAG, "camera: exposure %d lines of %d (%s), gain %.1fx", lines, vts,
+             CONFIG_CAMERA_EXPOSURE_LINES > 0 ? "fixed" : "auto",
+             (double)(g & 0x3FF) / 16.0);
+}
+
 static esp_err_t init_camera(void)
 {
     //initialize the camera
@@ -141,6 +180,7 @@ static esp_err_t init_camera(void)
       s->set_saturation(s, -2); // lower the saturation
     }
     s->set_pixformat(s, PIXFORMAT_GRAYSCALE);
+    apply_exposure(s);
     return ESP_OK;
 }
 #endif
@@ -273,6 +313,7 @@ void at_detect_task(void* pvParams)
         /* Detections are paired with the pose read after detection, so a
          * frame left queued during the last detection must not be used. */
         camera_fb_t *pic = camera_fb_get_fresh();
+        log_exposure();
       if (pic == NULL) {
         ESP_LOGW(TAG, "Camera frame grab failed");
         vTaskDelay(pdMS_TO_TICKS(LOOP_DELAY_MS));

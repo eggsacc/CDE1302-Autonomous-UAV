@@ -47,6 +47,11 @@ static uint8_t    s_traj_id;       /* current upload id, 0 = none / already play
 static uint16_t   s_traj_dt_ms;
 static float      s_traj_org[3];   /* odom position where playback started        */
 static float      s_traj_yaw;
+#ifdef CONFIG_TRAJ_WAYPOINTS
+#define TRAJ_WAYPOINTS 1
+#else
+#define TRAJ_WAYPOINTS 0
+#endif
 static traj_gate_t s_traj_gate;    /* where along the path the target is          */
 static int64_t    s_traj_tick_us;  /* esp_timer time of the previous traj_tick()  */
 
@@ -247,7 +252,9 @@ static int traj_next_corner(int from)
  * Trajectory playback.  The target stays CONFIG_TRAJ_LOOKAHEAD_CM ahead of the
  * drone along the path (traj_gate.h) and PX4 flies to it: a position target with
  * no velocity, like a GOTO, so the speed comes from the steady gap.  With the
- * lookahead at 0 it plays on the clock, with velocity feedforward.
+ * lookahead at 0 it plays on the clock, with velocity feedforward.  With
+ * CONFIG_TRAJ_WAYPOINTS the target is the next lane end itself, so PX4 flies
+ * each lane in one go.  Heading stays at the takeoff heading (s_traj_yaw).
  * --------------------------------------------------------------------------- */
 static void traj_point(float k, float *x, float *y, void *ctx)
 {
@@ -297,7 +304,7 @@ static void traj_tick(void)
         return;
     }
 
-    if (CONFIG_TRAJ_LOOKAHEAD_CM > 0) {
+    if (TRAJ_WAYPOINTS || CONFIG_TRAJ_LOOKAHEAD_CM > 0) {
         mavlink_set_position_ned(sp_x, sp_y, sp_z, s_traj_yaw);
     } else {
         float hz = 1000.0f / (float)s_traj_dt_ms;
@@ -507,9 +514,13 @@ void nav_traj_start(uint8_t id, uint16_t dt_ms)
         s_traj_org[2] = st.z;
         s_traj_yaw    = st.heading;
         s_traj_dt_ms  = dt_ms;
+#if TRAJ_WAYPOINTS
+        traj_gate_start_waypoints(&s_traj_gate, s_traj_n, CONFIG_TRAJ_CORNER_CM / 100.0f);
+#else
         traj_gate_start(&s_traj_gate, s_traj_n, dt_ms / 1000.0f,
                         CONFIG_TRAJ_LOOKAHEAD_CM / 100.0f,
                         CONFIG_TRAJ_CORNER_CM / 100.0f);
+#endif
         s_traj_gate.corner = traj_next_corner(0);
         s_traj_tick_us = esp_timer_get_time();
         s_traj_id     = 0;              /* consume: a repeated START cannot replay */

@@ -93,3 +93,24 @@ def test_clock_mode_finishes_on_time_whatever_the_drone_does(host):
     r = fly(host, lookahead=0.0, max_speed=0.05, seconds=25)      # 2 m at 0.1 m/s = 20 s
     assert r.done_s == pytest.approx(20.0, abs=0.5)
     assert r.x < 1.4
+
+
+# Waypoint mode (lookahead < 0 in the driver): the target is the next corner itself.
+
+def test_waypoints_fly_at_the_speed_limit(host):
+    # Far from the waypoint PX4 saturates at MPC_XY_VEL_MAX, steady, no stop-go.
+    r = fly(host, lookahead=-1, corner=0.15, max_speed=0.4, leg=3.0, seconds=30)
+    assert r.done_s > 0 and r.end_err < 0.16
+    assert r.speed == pytest.approx(0.4, rel=0.05) and r.speed_std < 0.01
+
+
+def test_waypoints_reach_each_corner(host):
+    r = fly(host, lookahead=-1, corner=0.10, max_speed=0.4, leg=1.0, leg2=0.5, seconds=30)
+    assert r.done_s > 0
+    assert 0 <= r.corner_err <= 0.10 + 0.02
+    assert r.x == pytest.approx(1.0, abs=0.12) and r.y == pytest.approx(0.5, abs=0.12)
+
+
+def test_waypoints_wait_for_a_drone_that_cannot_move(host):
+    r = fly(host, lookahead=-1, max_speed=0.0, seconds=30)
+    assert r.done_s < 0 and r.x == 0.0

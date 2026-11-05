@@ -13,7 +13,7 @@ drone_id: 2              # ESP32 CONFIG_DRONE_ID; drone IP = 192.168.1.(200 + id
 # Search area. PLACEHOLDER numbers: replace with the real area on demo day.
 area:
   x_min: 0.0             # m
-  x_max: 3.0             # m
+  x_max: 3.5             # m
   y_min: 0.0             # m
   y_max: 1.0             # m
   margin: 0.0            # keep waypoints this far inside the edges (m)

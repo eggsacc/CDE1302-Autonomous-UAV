@@ -12,6 +12,11 @@
  * Corners are stricter than lanes: the target stops on each one until the drone
  * is within corner_m, and the last point counts as a corner.
  *
+ * Waypoint mode (traj_gate_start_waypoints): the target jumps straight to the
+ * next corner and stays there until the drone is within corner_m, then jumps to
+ * the one after.  PX4 then accelerates and slows down by itself, at up to
+ * MPC_XY_VEL_MAX, instead of chasing a target that creeps along the path.
+ *
  * lookahead_m <= 0 plays on the clock, as if the drone always kept up.
  * The check uses the position the ESP32 reads from PX4 over UART, so Wi-Fi gaps
  * do not affect it.
@@ -45,7 +50,11 @@ typedef struct {
     float lookahead_m;  /* <= 0: play on the clock */
     float corner_m;     /* how close to get to a corner; <= 0: no corner stops */
     int   corner;       /* sample of the next corner; -1: caller must set the next */
+    bool  waypoints;    /* target = the next corner itself */
 } traj_gate_t;
+
+/* Waypoint mode: fly corner to corner, each reached within corner_m. */
+void traj_gate_start_waypoints(traj_gate_t *g, int n_points, float corner_m);
 
 /* Horizontal position of the path at sample k (may be fractional). */
 typedef void (*traj_point_fn)(float k, float *x, float *y, void *ctx);

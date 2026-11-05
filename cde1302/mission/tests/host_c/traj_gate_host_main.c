@@ -7,6 +7,7 @@
  *                  <leg_m> <leg2_m> [freeze_s]
  *
  * noise_m adds position wobble to what the gate and the "PX4" see, like flow noise.
+ * lookahead_m < 0 selects waypoint mode (corner_m = waypoint radius).
  * From freeze_s the position stops being fresh.  With leg2_m = 0 there is no corner.
  *
  * Output: done_s k x y end_err corner_err mean_speed speed_std max_gap
@@ -56,7 +57,8 @@ int main(int argc, char **argv)
     int n = s_n1 + (int)(leg2 / SPACING + 0.5f) + 1;
 
     traj_gate_t g;
-    traj_gate_start(&g, n, SAMPLE_S, lookahead, corner_m);
+    if (lookahead < 0.0f) traj_gate_start_waypoints(&g, n, corner_m);
+    else traj_gate_start(&g, n, SAMPLE_S, lookahead, corner_m);
     if (leg2 > 0.0f && corner_m > 0.0f) g.corner = s_n1;
 
     float x = 0, y = 0, vx = 0, vy = 0, done_s = -1, corner_err = -1, max_gap = 0;

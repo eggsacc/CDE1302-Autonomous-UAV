@@ -14,6 +14,16 @@ void traj_gate_start(traj_gate_t *g, int n_points, float sample_s, float lookahe
     g->lookahead_m = lookahead_m;
     g->corner_m = corner_m;
     g->corner = g->last;
+    g->waypoints = false;
+}
+
+#define WAYPOINT_MIN_RADIUS_M 0.05f
+
+void traj_gate_start_waypoints(traj_gate_t *g, int n_points, float corner_m)
+{
+    traj_gate_start(g, n_points, 1.0f, 1.0f, corner_m);
+    if (g->corner_m < WAYPOINT_MIN_RADIUS_M) g->corner_m = WAYPOINT_MIN_RADIUS_M;
+    g->waypoints = true;
 }
 
 static float distance(float k, float drone_x, float drone_y, traj_point_fn point, void *ctx)
@@ -37,6 +47,7 @@ traj_gate_result_t traj_gate_step(traj_gate_t *g, float elapsed_s, float drone_x
     if (!pos_ok) return TRAJ_GATE_WAIT;
 
     float limit = (float)(g->corner >= 0 ? g->corner : g->last);
+    if (g->waypoints) g->k = limit;                   /* straight to the next corner */
     float err = distance(g->k, drone_x, drone_y, point, ctx);
 
     if (g->k >= limit) {

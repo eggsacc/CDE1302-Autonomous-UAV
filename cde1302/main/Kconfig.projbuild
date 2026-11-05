@@ -134,6 +134,17 @@ menu "Drone Configuration"
         help
           GPIO PX4 RX PIN
 
+    config TRAJ_WAYPOINTS
+        bool "Trajectory: fly straight from corner to corner"
+        default y
+        help
+          The setpoint jumps straight to the next lane end and stays there until
+          the drone is within TRAJ_CORNER_CM, then jumps to the next one. PX4
+          speeds up and slows down by itself; the top speed is MPC_XY_VEL_MAX.
+          Heading stays fixed at the takeoff heading. The lookahead below is not
+          used in this mode.
+          Off = the target slides along the path TRAJ_LOOKAHEAD_CM ahead.
+
     config TRAJ_LOOKAHEAD_CM
         int "Trajectory: target distance ahead of the drone (cm)"
         range 0 100
@@ -152,7 +163,7 @@ menu "Drone Configuration"
         default 15
         help
           At each lane end and at the last point the target stops until the
-          drone is this close. Keep below the lookahead, or the drone will not
+          drone is this close (in waypoint mode: the waypoint radius, min 5 cm). Keep below the lookahead, or the drone will not
           slow down for corners. 0 = no stop at corners.
 
     config CAMERA_STREAM_DEFAULT_FPS
@@ -168,6 +179,29 @@ menu "Drone Configuration"
         default 60
         help
           Used when laptop/camera_stream.py does not pass --quality.
+
+    config CAMERA_EXPOSURE_LINES
+        int "Camera exposure, fixed (sensor lines, 0 = auto)"
+        range 0 4095
+        default 0
+        help
+          Shorter exposure = less motion blur, darker image. 0 leaves auto
+          exposure on. With auto on, the serial log prints
+          "camera: exposure N lines of M (auto), gain Gx" every 5 s: fly under
+          your lights, read N, then try about half of it here.
+          In lines of the sensor (OV3660): one frame is M lines, so the
+          exposure time is N/M of a frame. Ignored on sensors other than the
+          OV3660 / OV2640 (OV2640: 0-1200).
+
+    config CAMERA_GAIN
+        int "Camera gain, fixed (1-64 x, 0 = auto)"
+        range 0 64
+        default 0
+        help
+          0 = automatic gain: with a fixed exposure it brightens the image by
+          itself, up to 128x. Set a value only if the auto gain hunts or the
+          image is still too dark. More gain = more noise; AprilTags cope
+          with noise far better than with blur.
 
 endmenu
 
