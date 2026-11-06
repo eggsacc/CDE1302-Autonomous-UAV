@@ -65,7 +65,7 @@ Dual-core FreeRTOS on ESP32-S3. Tasks are pinned to specific cores:
 | `mission_task` | 1 | 2 | — | State machine: CMD_START → arm → takeoff → laptop control → CMD_LAND (repeats) |
 | `camera_stream_task` | 1 (0 with onboard detect) | 1 | on demand | JPEG camera preview for the laptop (`mission.py`, `tag_stream.py`; started by `at_detect_task`) |
 
-**Camera**: two frame buffers (`fb_count=2`) shared by `at_detect_task` and `camera_stream_task`; both fetch via `camera_fb_get_fresh()` and return each buffer once. Internal RAM is tight: `esp-apriltag` allocates from PSRAM (`apriltag_psram_alloc.h`), and big buffers belong in PSRAM. `laptop/tag_stream.py` compiles the same `esp-apriltag` sources for the laptop so its overlay matches what the drone decodes; keep `at_detect.c`'s parameters and gate in sync with `laptop/apriltag_host.py`.
+**Camera**: two frame buffers (`fb_count=2`) shared by `at_detect_task` and `camera_stream_task`; both fetch via `camera_fb_get_fresh()` and return each buffer once. Internal RAM is tight: `esp-apriltag` allocates from PSRAM (`apriltag_psram_alloc.h`), and big buffers belong in PSRAM. `laptop/tag_stream.py` compiles the same `esp-apriltag` sources for the laptop so its overlay matches what the drone decodes; keep `at_detect.c`'s parameters and gate in sync with `FIRMWARE_PARAMS` in `laptop/apriltag_host.py`. The laptop itself detects with `LAPTOP_PARAMS` (the same, but `quad_decimate` 1.0 and `quad_sigma` 0: full resolution, no blur), the default for `Detector()`.
 
 **Setpoint ownership**: `mission_task` owns MAVLink setpoints during takeoff/landing. `nav_task` takes over when `nav_set_goal_ned()` is called. `nav_cancel()` returns ownership to mission.
 

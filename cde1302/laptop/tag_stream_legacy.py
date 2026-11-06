@@ -38,6 +38,7 @@ from apriltag_host import (
     Detection,
     Detector,
     DetectorParams,
+    LAPTOP_PARAMS,
     gate_reason,
 )
 from camera_stream import (
@@ -425,10 +426,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scale", type=float, default=2.0,
                         help="window scale (default: 2)")
     parser.add_argument("--decimate", type=float,
-                        default=DetectorParams.quad_decimate,
-                        help="quad_decimate (default: firmware, 1.5)")
-    parser.add_argument("--sigma", type=float, default=DetectorParams.quad_sigma,
-                        help="quad_sigma (default: firmware, 1.0)")
+                        default=LAPTOP_PARAMS.quad_decimate,
+                        help="quad_decimate (default: 1.0, full resolution, "
+                             "as the mission; the firmware's is 1.5)")
+    parser.add_argument("--sigma", type=float, default=LAPTOP_PARAMS.quad_sigma,
+                        help="quad_sigma (default: 0, as the mission; the "
+                             "firmware's is 1.0)")
     parser.add_argument("--detail", action="store_true",
                         help="tuning view: HUD, the gate's rejects, the "
                              "drone's own detections, full labels "
@@ -473,7 +476,8 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 
 def detector_params(args: argparse.Namespace) -> DetectorParams:
-    """The firmware's parameters, with quad_decimate/quad_sigma overridable."""
+    """The firmware's parameters, with quad_decimate/quad_sigma overridable
+    (they default to the laptop's: 1.0 and 0)."""
     return DetectorParams(quad_decimate=args.decimate, quad_sigma=args.sigma)
 
 

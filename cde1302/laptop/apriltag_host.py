@@ -29,6 +29,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -72,6 +73,20 @@ class Intrinsics:
 
 
 FIRMWARE_PARAMS = DetectorParams()          # at_detect.c sets exactly these
+# What the laptop detects with by default (mission.py, tag_stream.py): the
+# firmware's detector, but the quad search on the full-resolution image and
+# without the blur.  1.5 was a speed trade for the ESP32.  At full resolution
+# the sigma 1.0 blur smears a small tag's cells together and does worse than
+# 1.5 did, so it goes too.  Measured on synthetic 320x240 frames (random pose,
+# noise, JPEG q60, gate applied), share of tags found by black-square size:
+#                 10 px   12 px   14 px   ms/frame
+#   dec 1.5 sig 1  37 %    73 %    83 %     3.4   (real photos)
+#   dec 1.0 sig 1   0 %    10 %    57 %
+#   dec 1.0 sig 0  68 %    99 %   100 %     8.0   (real photos)
+# with no more false ids.  8 ms fits 30 fps.  Everything else stays the
+# firmware's.
+LAPTOP_PARAMS = dataclasses.replace(FIRMWARE_PARAMS, quad_decimate=1.0,
+                                    quad_sigma=0.0)
 FIRMWARE_INTRINSICS = Intrinsics(fx=163.5047216, fy=153.22210511,
                                  cx=154.00573087, cy=107.10222796)
 TAG_SIZE_M = 0.12                           # TAG_SIZE in at_detect.c
@@ -425,7 +440,7 @@ class Detector:
     Holds C resources: use it as a context manager, or call close().
     """
 
-    def __init__(self, params: DetectorParams = FIRMWARE_PARAMS,
+    def __init__(self, params: DetectorParams = LAPTOP_PARAMS,
                  intrinsics: Intrinsics = FIRMWARE_INTRINSICS,
                  tag_size_m: float = TAG_SIZE_M,
                  min_margin: float = GATE_MIN_MARGIN,

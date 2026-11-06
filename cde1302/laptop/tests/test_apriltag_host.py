@@ -23,6 +23,8 @@ from apriltag_host import (
     CAM_POS_M,
     EXPECTED_NCODES,
     FIRMWARE_INTRINSICS,
+    FIRMWARE_PARAMS,
+    LAPTOP_PARAMS,
     GATE_MIN_MARGIN,
     TAG_SIZE_M,
     Detection,
@@ -54,7 +56,8 @@ def dictionary():
 
 @pytest.fixture(scope="module")
 def detector():
-    with Detector() as det:
+    # The firmware's parameters: the tests below pin its semantics.
+    with Detector(FIRMWARE_PARAMS) as det:
         yield det
 
 
@@ -309,14 +312,22 @@ def test_firmware_constants_match_at_detect_c():
                                                                 107.10222796)
 
 
+def test_the_laptop_default_is_the_firmware_at_full_resolution_unblurred():
+    with Detector() as det:
+        assert det.params is LAPTOP_PARAMS
+    assert (LAPTOP_PARAMS.quad_decimate, LAPTOP_PARAMS.quad_sigma) == (1.0, 0.0)
+    assert LAPTOP_PARAMS == DetectorParams(quad_decimate=1.0, quad_sigma=0.0)
+    assert not LAPTOP_PARAMS.blurs_in_place  # no blur: detects on the caller's buffer
+
+
 def test_the_margin_gate_is_strictly_greater_in_c_too(detector, dictionary):
     """at_detect.c poses on `margin > 55`, so a margin exactly at the limit is
     rejected — in the shim as well, or the two would disagree at the boundary."""
     img = render(dictionary, 5)
     margin = detector.detect(img)[0].decision_margin
-    with Detector(min_margin=margin) as at_limit:
+    with Detector(FIRMWARE_PARAMS, min_margin=margin) as at_limit:
         assert not at_limit.detect(img)[0].pose_valid
-    with Detector(min_margin=margin - 1e-6) as just_under:
+    with Detector(FIRMWARE_PARAMS, min_margin=margin - 1e-6) as just_under:
         assert just_under.detect(img)[0].pose_valid
 
 

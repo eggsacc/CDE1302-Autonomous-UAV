@@ -269,7 +269,7 @@ def test_hud_lines_report_what_the_viewer_is_doing():
     assert len(lines) == 3
     assert "#42" in lines[0] and "9.6 fps" in lines[0] and "det 1.8 ms" in lines[0]
     assert "esp 130 ms" in lines[0] and "drops 3/1" in lines[0]
-    assert "dec 1.5 sig 1 sharp 0.75" in lines[1]
+    assert "dec 1 sig 0 sharp 0.75" in lines[1]
     assert "gate h<=1 m>55" in lines[1]
     assert "1 tag (+2 rejected)" in lines[1]
     assert lines[2] == "esp 1.4 fps 620 ms/frame"
@@ -459,11 +459,11 @@ def test_annotate_leaves_an_empty_frame_empty():
 # CLI
 # ---------------------------------------------------------------------------
 
-def test_defaults_are_the_firmware_parameters():
+def test_defaults_are_the_laptop_parameters():
     args = parse_args(["--esp-ip", "127.0.0.1"])
     params = detector_params(args)
     assert (params.quad_decimate, params.quad_sigma, params.decode_sharpening,
-            params.refine_edges) == (1.5, 1.0, 0.75, True)
+            params.refine_edges) == (1.0, 0.0, 0.75, True)
     assert not args.detail and not args.headless
     assert args.scale == 2.0 and args.frames == 0 and args.save_dir is None
     assert args.config.name == "setup.yaml"
