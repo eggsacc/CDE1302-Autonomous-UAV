@@ -14,7 +14,7 @@ drone_id: 2              # ESP32 CONFIG_DRONE_ID; drone IP = 192.168.1.(200 + id
 area:
   x_min: 0.0             # m
   x_max: 3.5             # m
-  y_min: 0.0             # m
+  y_min: -0.5             # m
   y_max: 1.0             # m
   margin: 0.0            # keep waypoints this far inside the edges (m)
 
@@ -25,11 +25,11 @@ sweep:
                          # The heading never changes, so the whole sweep is shifted this far
                          # backwards so the VIEW, not the drone, covers the area. 0 = no shift,
                          # for a camera looking straight down.
-  start_at_home: true    # true: at sweep start, move the whole plan (and the area box) so the first
+  start_at_home: false    # true: at sweep start, move the whole plan (and the area box) so the first
                          # waypoint is home, the takeoff spot. Only the area's SIZE then matters:
                          # it extends +x (North) and +y (East) of home, lanes along lanes_along.
                          # false: the area is fixed in the PX4 frame (x_min..y_max as written).
-  start_in_middle: true  # with start_at_home: home is at the MIDDLE of the area's starting edge, not
+  start_in_middle: false  # with start_at_home: home is at the MIDDLE of the area's starting edge, not
                          # its corner. The lanes spread evenly either side of home, so the drone
                          # first flies sideways to the first lane. false: waypoint 1 is home.
 
@@ -49,8 +49,8 @@ flight:
                            # 0.20 = 2 cm spacing at 0.1 m/s and 6 upload packets for a full sweep (s)
   traj_max_speed_mps: 0.40 # refuse faster trajectories; firmware caps at 0.50 (m/s)
   traj_upload_gap_s: 0.06  # gap between upload packets; the ESP reads its queue of 6 at 10 Hz (s)
-  traj_start_timeout_s: 1.5  # re-upload if telemetry doesn't show TRAJ within this (s)
-  traj_start_attempts: 5   # upload attempts before abort-landing (count)
+  traj_start_timeout_s: 2.0  # re-upload if telemetry doesn't show TRAJ within this (s)
+  traj_start_attempts: 20  # upload attempts before abort-landing (count); 20 x 2 s = 40 s hovering
   traj_end_margin_s: 10.0  # end-of-trajectory timeout = duration x traj_timeout_factor + this (s)
   traj_timeout_factor: 4.0 # the setpoint waits for the drone, so allow this many times the planned time
   turn_time_s: 4.0         # waypoints mode: allowance for turning at each waypoint (s)
@@ -65,7 +65,7 @@ flight:
   land_repeats: 3          # CMD_LAND copies sent (UDP can drop packets)
   repeat_gap_s: 0.1        # gap between repeated command copies (s)
   tick_hz: 10.0            # state machine tick rate (Hz)
-  stop_when_all_found: true  # return home as soon as tags.expected_count tags are confirmed
+  stop_when_all_found: false  # return home as soon as tags.expected_count tags are confirmed
   land_settle_s: 6.0       # after CMD_LAND, wait this long before calling the mission done (s)
   land_radius_m: 0.05      # back home: land only once within this of the start point... (m)
   land_hold_s: 1.0         # ...for this long (s)
