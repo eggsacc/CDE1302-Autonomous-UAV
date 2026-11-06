@@ -61,9 +61,9 @@ Dual-core FreeRTOS on ESP32-S3. Tasks are pinned to specific cores:
 | `tof_task` | 0 | 4 | 15 Hz | Reads 8× VL53L5CX ToF sensors via I2C mux (TCA9548A) |
 | `wifi_task` | 0 | 2 | 10 Hz | UDP telemetry to laptop, receives commands |
 | `nav_task` | 1 | 4 | 20 Hz | VFH obstacle avoidance, goal navigation, collision avoidance, WiFi killswitch |
-| `at_detect_task` | 1 | 1 | ~2 Hz | AprilTag detection via camera (tag16h5); detection only, never affects flight |
+| `at_detect_task` | 1 | 1 | ~2 Hz | Camera init + exposure log; onboard AprilTag detection (tag16h5) only with `CONFIG_AT_ONBOARD_DETECT` (off: the laptop detects). Never affects flight |
 | `mission_task` | 1 | 2 | — | State machine: CMD_START → arm → takeoff → laptop control → CMD_LAND (repeats) |
-| `camera_stream_task` | 0 | 1 | on demand | JPEG camera preview for `camera_stream.py` (started by `at_detect_task`) |
+| `camera_stream_task` | 1 (0 with onboard detect) | 1 | on demand | JPEG camera preview for the laptop (`mission.py`, `tag_stream.py`; started by `at_detect_task`) |
 
 **Camera**: two frame buffers (`fb_count=2`) shared by `at_detect_task` and `camera_stream_task`; both fetch via `camera_fb_get_fresh()` and return each buffer once. Internal RAM is tight: `esp-apriltag` allocates from PSRAM (`apriltag_psram_alloc.h`), and big buffers belong in PSRAM. `laptop/tag_stream.py` compiles the same `esp-apriltag` sources for the laptop so its overlay matches what the drone decodes; keep `at_detect.c`'s parameters and gate in sync with `laptop/apriltag_host.py`.
 
@@ -111,4 +111,5 @@ UDP between ESP32 (port 5005 out, 5006 in) and laptop:
 - `PEER_INJECT_RANGE_M` (4.0m), `PEER_DENSITY_MAX` (9.0) — peer avoidance in `nav_task.c`
 - `CRUISE_ALT_M` (0.5m) — mission altitude in `main.c`
 - Exploration params (goal distance, cone radius, heading weight) — in `setup.yaml`
-- `CONFIG_CAMERA_STREAM_DEFAULT_FPS` (10), `CONFIG_CAMERA_STREAM_DEFAULT_QUALITY` (60) — camera preview defaults (menuconfig)
+- `CONFIG_CAMERA_STREAM_DEFAULT_FPS` (30 = every frame), `CONFIG_CAMERA_STREAM_DEFAULT_QUALITY` (60) — camera preview defaults (menuconfig)
+- `CONFIG_CAMERA_FAST_CLOCK` (on: OV3660 at ~2x frame rate), `CONFIG_AT_ONBOARD_DETECT` (off: the laptop detects, the stream gets every frame) — menuconfig

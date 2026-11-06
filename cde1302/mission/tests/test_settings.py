@@ -54,7 +54,7 @@ def test_optional_sections_take_defaults(raw):
     ("flight", "tick_hz", 0, "flight.tick_hz must be > 0"),
     ("flight", "land_repeats", 2.5, "flight.land_repeats must be a whole number"),
     ("safety", "stale_timeout_s", "3", "safety.stale_timeout_s must be a number"),
-    ("camera", "fps", 20, "camera.fps must be 0"),
+    ("camera", "fps", 31, "camera.fps must be 0"),
     ("camera", "quality", 5, "camera.quality must be 0"),
     ("tags", "tags_on_floor", "yes", "tags.tags_on_floor must be true or false"),
     ("tags", "outlier_radius_m", 0.1, "outlier_radius_m (0.1) must be >="),

@@ -75,7 +75,7 @@ safety:
   mission_time_limit_s: 600.0  # after this, stop searching, return and land (s)
 
 camera:
-  fps: 0                       # stream rate 1-15 fps; 0 = firmware default (10)
+  fps: 0                       # stream rate 1-30 fps; 0 = firmware default (30 = every frame)
   quality: 0                   # JPEG quality 10-90; 0 = firmware default (60)
   capture_latency_bias_s: 0.0  # extra shift of the estimated capture time, earlier (s)
 

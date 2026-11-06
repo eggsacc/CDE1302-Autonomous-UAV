@@ -3,12 +3,20 @@
 #include <stdbool.h>
 
 #include "esp_camera.h"
+#include "sdkconfig.h"
 
-/* On-demand JPEG camera preview for laptop/camera_stream.py.  Core 0 at the
- * lowest priority, so encoding only uses time mavlink_task and wifi_task
- * leave idle.  The stream follows the IP address of the latest keepalive.
- * The stack is in PSRAM; jpge + send() peak at ~4 KB. */
+/* On-demand JPEG camera preview for laptop/camera_stream.py, at the lowest
+ * priority, so encoding only uses time the other tasks on its core leave
+ * idle.  Without the onboard detector, core 1 is nearly idle (nav_task and
+ * mission_task mostly sleep), so encoding goes there, away from the WiFi,
+ * lwIP and camera driver tasks on core 0.  The stream follows the IP address
+ * of the latest keepalive.  The stack is in PSRAM; jpge + send() peak at
+ * ~4 KB. */
+#if CONFIG_AT_ONBOARD_DETECT
 #define CAMERA_STREAM_TASK_CORE      0
+#else
+#define CAMERA_STREAM_TASK_CORE      1
+#endif
 #define CAMERA_STREAM_TASK_PRIORITY  1
 #define CAMERA_STREAM_TASK_STACK     6144
 

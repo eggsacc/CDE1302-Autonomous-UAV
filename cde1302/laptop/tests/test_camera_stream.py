@@ -48,7 +48,7 @@ def test_keepalive_bytes_match_firmware():
     assert build_camera_stream_command() == bytes((0x02, 0x07, 1, 0, 0))
     assert build_camera_stream_command(True, 12, 75) == bytes.fromhex("0207010c4b")
     assert build_camera_stream_command(False) == bytes((0x02, 0x07, 0, 0, 0))
-    for fps, quality in ((16, 0), (-1, 0), (0, 9), (0, 91)):
+    for fps, quality in ((31, 0), (-1, 0), (0, 9), (0, 91)):
         with pytest.raises(ValueError):
             build_camera_stream_command(True, fps, quality)
 

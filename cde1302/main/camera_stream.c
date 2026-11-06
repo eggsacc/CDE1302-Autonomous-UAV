@@ -31,7 +31,7 @@ static const char *TAG = "cam_stream";
 
 #define CHUNK_BYTES        1400
 #define MAX_PIXELS         (320 * 240)
-#define MAX_FPS            15
+#define MAX_FPS            30                /* must match laptop/protocol.py */
 #define MIN_QUALITY        10
 #define MAX_QUALITY        90
 #define POLL_MS            100

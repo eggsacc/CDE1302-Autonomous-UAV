@@ -60,7 +60,7 @@ def main():
     parser.add_argument("--esp-ip", required=True,
                         help="drone IP, 192.168.1.(200 + drone id)")
     parser.add_argument("--fps", type=int, default=0,
-                        help="1-15 (default 0 = firmware's 10)")
+                        help="1-30 (default 0 = firmware's 30, i.e. every frame)")
     parser.add_argument("--quality", type=int, default=0,
                         help="JPEG quality 10-90 (default 0 = firmware's 60)")
     parser.add_argument("--scale", type=float, default=2.0,

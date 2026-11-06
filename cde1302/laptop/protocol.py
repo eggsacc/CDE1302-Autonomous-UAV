@@ -216,7 +216,7 @@ def build_command(cmd: CommandPacket) -> bytes:
                        cmd.goal_x, cmd.goal_y, *tag_ids)
 
 
-CAMERA_STREAM_MAX_FPS     = 15
+CAMERA_STREAM_MAX_FPS     = 30   # main/camera_stream.c MAX_FPS
 CAMERA_STREAM_MIN_QUALITY = 10
 CAMERA_STREAM_MAX_QUALITY = 90
 

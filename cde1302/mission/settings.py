@@ -354,7 +354,7 @@ def validate(s: Settings) -> None:
     _non_negative(s.safety, "safety", "geofence_margin_m")
 
     c = s.camera
-    _check(0 <= c.fps <= 15, f"camera.fps must be 0 (firmware default) or 1-15 (got {c.fps})")
+    _check(0 <= c.fps <= 30, f"camera.fps must be 0 (firmware default) or 1-30 (got {c.fps})")
     _check(c.quality == 0 or 10 <= c.quality <= 90,
            f"camera.quality must be 0 (firmware default) or 10-90 (got {c.quality})")
 

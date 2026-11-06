@@ -114,8 +114,9 @@ static camera_config_t camera_config = {
     // .jpeg_quality = 12, //0-63 lower number means higher quality
     /* Two buffers keep the driver capturing while one is held, so a frame is
      * usually ready at once: the preview runs at the sensor rate (~9 fps on
-     * the OV3660) instead of ~4 fps with one buffer.  ("JPEG only" upstream
-     * is just a note; grayscale QVGA works.) */
+     * the OV3660 at the driver's clock, about twice that with
+     * CONFIG_CAMERA_FAST_CLOCK) instead of ~4 fps with one buffer.  ("JPEG
+     * only" upstream is just a note; grayscale QVGA works.) */
     .fb_count = 2,
     .fb_location = CAMERA_FB_IN_PSRAM,
     .grab_mode = CAMERA_GRAB_LATEST,
@@ -138,6 +139,29 @@ static void apply_exposure(sensor_t *s)
     ESP_LOGI(TAG, "camera: exposure %s, gain %s",
              CONFIG_CAMERA_EXPOSURE_LINES > 0 ? "fixed" : "auto",
              CONFIG_CAMERA_GAIN > 0 ? "fixed" : "auto (ceiling 128x)");
+}
+
+/* The driver's set_framesize() (ov3660.c) clocks grayscale/RGB QVGA..HVGA at
+ * SYSCLK = XCLK (seld5 = 2: ~9 fps here) and frames below QVGA at twice that
+ * (seld5 = 0).  QVGA is read through the same binned window as those smaller
+ * frames, so the faster clock gives ~2x the frame rate.  The pixel clock stays
+ * at 10 MHz (20 MHz XCLK: VCO 160 MHz, PLLCLK 160 MHz, SYSCLK 40 MHz; the
+ * driver's own JPEG mode runs SYSCLK at 50 MHz).  Must run after
+ * esp_camera_init(): any later set_framesize() puts the driver's PLL back.
+ * Argument order is the sensor_t one (bypass, mul, sys, root, pre, seld5,
+ * pclken, pclk), not ov3660.c's internal set_pll(). */
+static void apply_fast_clock(sensor_t *s)
+{
+#if CONFIG_CAMERA_FAST_CLOCK
+    if (s->id.PID != OV3660_PID || s->set_pll == NULL) return;
+    if (s->set_pll(s, 0, 8, 1, 0, 0, 0, 1, 8) != 0) {
+        ESP_LOGW(TAG, "camera: fast clock failed, keeping the driver's clock");
+        return;
+    }
+    ESP_LOGI(TAG, "camera: fast clock on (SYSCLK 2x, ~2x frame rate)");
+#else
+    (void)s;
+#endif
 }
 
 /* Every 5 s: what the sensor is actually using (OV3660 registers), so a
@@ -180,6 +204,7 @@ static esp_err_t init_camera(void)
       s->set_saturation(s, -2); // lower the saturation
     }
     s->set_pixformat(s, PIXFORMAT_GRAYSCALE);
+    apply_fast_clock(s);
     apply_exposure(s);
     return ESP_OK;
 }
@@ -200,6 +225,7 @@ static int8_t            s_known_tags[AT_MAX_KNOWN_TAGS];
 static int               s_known_count = 0;
 static SemaphoreHandle_t s_known_mutex;
 
+#if CONFIG_AT_ONBOARD_DETECT
 /* Is this tag ID already found by the fleet? */
 static bool tag_is_known(int id)
 {
@@ -211,6 +237,7 @@ static bool tag_is_known(int id)
     xSemaphoreGive(s_known_mutex);
     return found;
 }
+#endif
 
 void at_detect_init(void)
 {
@@ -278,6 +305,19 @@ void at_detect_task(void* pvParams)
         vTaskDelete(NULL);
     }
 
+#if !CONFIG_AT_ONBOARD_DETECT
+    /* The laptop detects: the stream is the camera's only consumer, so it
+     * gets every frame.  This task stays only for the exposure log.  The
+     * telemetry tag fields stay "none" (tag_id -1, pose invalid) and the
+     * :5008 debug packets report no detections. */
+    camera_stream_start();
+    ESP_LOGI(TAG, "Onboard AprilTag detection off (CONFIG_AT_ONBOARD_DETECT): "
+                  "camera streams to the laptop only");
+    for (;;) {
+        log_exposure();
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+#else
     /* NULL: always detect on the camera buffer (the preview just slows). */
     uint8_t *frame_copy = heap_caps_malloc(AT_FRAME_COPY_BYTES,
                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
@@ -444,7 +484,9 @@ void at_detect_task(void* pvParams)
         s_live = live;
         xSemaphoreGive(s_live_mutex);
 
-        ESP_LOGI(TAG, "%d Apriltags Found!", zarray_size(at_detections));
+        /* Debug level: at INFO this went out every frame on the 115200 baud
+         * console, and console output busy-waits on the UART. */
+        ESP_LOGD(TAG, "%d Apriltags Found!", zarray_size(at_detections));
 
         // cleanup
         apriltag_detections_destroy(at_detections);
@@ -455,6 +497,7 @@ void at_detect_task(void* pvParams)
 
         vTaskDelay(pdMS_TO_TICKS(LOOP_DELAY_MS));
     }
+#endif /* CONFIG_AT_ONBOARD_DETECT */
 #else
     ESP_LOGE(TAG, "Camera support is not available for this chip");
     vTaskDelete(NULL);

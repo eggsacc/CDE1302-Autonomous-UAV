@@ -166,12 +166,36 @@ menu "Drone Configuration"
           drone is this close (in waypoint mode: the waypoint radius, min 5 cm). Keep below the lookahead, or the drone will not
           slow down for corners. 0 = no stop at corners.
 
+    config AT_ONBOARD_DETECT
+        bool "Also detect AprilTags on the ESP32"
+        default n
+        help
+          Off: the ESP32 only streams the camera and the laptop detects
+          (mission/mission.py, laptop/tag_stream.py). Every camera frame then
+          goes to the stream.
+          On: the old onboard detector runs too. It takes frames from the
+          same two-buffer queue as the stream, so the laptop gets fewer
+          frames, and it needs a lot of CPU and PSRAM bandwidth. Only the
+          telemetry tag fields and the :5008 debug packets use it.
+
+    config CAMERA_FAST_CLOCK
+        bool "OV3660: double the sensor clock (about 2x frame rate)"
+        default y
+        help
+          The camera driver runs the OV3660 at half its clock for grayscale
+          QVGA (~9 fps). This uses the clock the driver itself picks for
+          smaller frames: same pixel clock, twice the sensor clock, about
+          twice the frame rate. Each sensor line then takes half as long, so
+          a fixed CAMERA_EXPOSURE_LINES gives half the exposure time: double
+          it to keep the same brightness. No effect on other sensors.
+
     config CAMERA_STREAM_DEFAULT_FPS
         int "Camera preview default frame rate"
-        range 1 15
-        default 10
+        range 1 30
+        default 30
         help
-          Used when laptop/camera_stream.py does not pass --fps.
+          Used when the laptop does not ask for a rate (fps 0). Above the
+          sensor's rate just means every frame is sent.
 
     config CAMERA_STREAM_DEFAULT_QUALITY
         int "Camera preview default JPEG quality"
