@@ -17,6 +17,7 @@
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
+#include "mavlink_task.h"
 #include "img_converters.h"
 #include "sdkconfig.h"
 
@@ -61,8 +62,28 @@ typedef struct __attribute__((packed)) {
 
 _Static_assert(sizeof(header_t) == 30, "must match laptop/protocol.py");
 
+/* Drone pose at capture, inside the JPEG as a COM (comment) segment right after
+ * SOI.  Image decoders skip COM segments, so viewers that do not know about it
+ * still work; mission/frame_pose.py reads it.  Payload little-endian. */
+typedef struct __attribute__((packed)) {
+    uint8_t  marker[2];    /* 0xFF 0xFE */
+    uint8_t  len_be[2];    /* segment length incl. these 2 bytes, big-endian */
+    uint8_t  magic[4];     /* "CDEP" */
+    uint8_t  version;      /* 1 */
+    uint8_t  flags;        /* POSE_VALID */
+    uint16_t gap_ms;       /* capture time -> nearest PX4 sample */
+    float    x, y;         /* PX4 local NED (m) at capture */
+    float    heading;      /* rad [-pi, pi), 0 = North, clockwise positive */
+    float    yaw_rate;     /* rad/s */
+} pose_com_t;
+
+_Static_assert(sizeof(pose_com_t) == 28, "must match mission/frame_pose.py");
+#define POSE_VALID 0x01
+
 typedef struct {
     header_t hdr;
+    pose_com_t com;
+    bool     com_done;     /* COM segment written (or skipped) */
     int64_t  capture_us;
     uint16_t fill;         /* payload bytes waiting in s_packet */
     bool     failed;       /* a send failed: send nothing more */
@@ -166,12 +187,8 @@ static void flush(frame_t *f)
     f->fill = 0;
 }
 
-/* jpge output callback: pack its 512-byte pieces into full payloads. */
-static size_t jpeg_out(void *arg, size_t index, const void *data, size_t len)
+static void append(frame_t *f, const uint8_t *src, size_t len)
 {
-    (void)index;
-    frame_t *f = arg;
-    const uint8_t *src = data;
     for (size_t left = len; left > 0; ) {
         size_t n = MIN(left, (size_t)(CHUNK_BYTES - f->fill));
         memcpy(s_packet + sizeof(header_t) + f->fill, src, n);
@@ -180,7 +197,46 @@ static size_t jpeg_out(void *arg, size_t index, const void *data, size_t len)
         left -= n;
         if (f->fill == CHUNK_BYTES) flush(f);
     }
+}
+
+/* jpge output callback: pack its 512-byte pieces into full payloads, with the
+ * pose COM segment inserted after the JPEG's first two bytes (SOI). */
+static size_t jpeg_out(void *arg, size_t index, const void *data, size_t len)
+{
+    (void)index;
+    frame_t *f = arg;
+    const uint8_t *src = data;
+    size_t left = len;
+    if (!f->com_done) {
+        f->com_done = true;
+        if (left >= 2 && src[0] == 0xFF && src[1] == 0xD8) {
+            append(f, src, 2);
+            append(f, (const uint8_t *)&f->com, sizeof(f->com));
+            src += 2;
+            left -= 2;
+        }
+    }
+    append(f, src, left);
     return len;
+}
+
+static void fill_pose_com(pose_com_t *c, int64_t capture_us)
+{
+    float x = 0, y = 0, heading = 0, rate = 0;
+    int32_t gap = 0;
+    bool ok = mavlink_pose_at(capture_us, &x, &y, &heading, &rate, &gap);
+    c->marker[0] = 0xFF;
+    c->marker[1] = 0xFE;
+    c->len_be[0] = 0;
+    c->len_be[1] = (uint8_t)(sizeof(*c) - 2);
+    memcpy(c->magic, "CDEP", 4);
+    c->version  = 1;
+    c->flags    = ok ? POSE_VALID : 0;
+    c->gap_ms   = (uint16_t)MIN(MAX(gap, 0), UINT16_MAX);
+    c->x = x;
+    c->y = y;
+    c->heading  = heading;
+    c->yaw_rate = rate;
 }
 
 /* ---------------------------------------------------------------------------
@@ -264,6 +320,7 @@ static void camera_stream_task(void *arg)
                 continue;
             }
             f.capture_us = capture_us(pic);
+            fill_pose_com(&f.com, f.capture_us);
             f.hdr.width  = pic->width;
             f.hdr.height = pic->height;
             memcpy(s_image, pic->buf, pixels);

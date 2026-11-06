@@ -89,6 +89,9 @@ class Flight:
     tick_hz: float = 10.0
     stop_when_all_found: bool = True
     land_settle_s: float = 6.0
+    land_radius_m: float = 0.05
+    land_hold_s: float = 1.0
+    land_settle_max_s: float = 10.0
 
 
 @dataclass(frozen=True)
@@ -103,12 +106,23 @@ class Camera:
     fps: int = 0
     quality: int = 0
     capture_latency_bias_s: float = 0.0
+    use_frame_pose: bool = True        # drone pose sent inside each frame (no Wi-Fi delay)
+    max_frame_pose_gap_ms: int = 100   # ignore a frame pose this far from a PX4 sample
 
 
 @dataclass(frozen=True)
 class Tags:
+    @property
+    def camera_pos_m(self) -> tuple[float, float, float]:
+        """Lens position in the body frame: forward, right, down (m)."""
+        return (self.camera_forward_m, self.camera_right_m, self.camera_down_m)
+
+
     tag_size_m: float = 0.12
     camera_pitch_deg: float = 90.0
+    camera_forward_m: float = 0.02     # lens ahead of the drone centre (m)
+    camera_right_m: float = 0.0        # lens right of the drone centre (m)
+    camera_down_m: float = 0.0         # lens below the drone centre (m)
     min_decision_margin: float = 55.0
     max_hamming: int = 1
     max_pose_err: float = 0.5
@@ -328,11 +342,13 @@ def validate(s: Settings) -> None:
     _non_negative(n, "network", "pose_lookup_tolerance_s")
 
     f = s.flight
+    _positive(f, "flight", "land_radius_m", "land_settle_max_s")
     _positive(f, "flight", "cruise_speed_mps", "hover_radius_m", "hover_timeout_s",
               "arrival_radius_m", "goto_resend_s", "start_repeats",
               "land_repeats", "tick_hz")
     _non_negative(f, "flight", "turn_time_s", "takeoff_wait_s", "hover_settle_s",
-                  "waypoint_timeout_margin_s", "repeat_gap_s", "land_settle_s")
+                  "waypoint_timeout_margin_s", "repeat_gap_s", "land_settle_s",
+                  "land_hold_s")
     _check(f.tick_hz <= 100, f"flight.tick_hz must be <= 100 (got {f.tick_hz})")
     _check(f.nav_mode in ("trajectory", "waypoints"),
            f"flight.nav_mode must be 'trajectory' or 'waypoints' (got {f.nav_mode!r})")
@@ -367,6 +383,10 @@ def validate(s: Settings) -> None:
            f"tags.min_sightings ({t.min_sightings})")
     _non_negative(t, "tags", "min_decision_margin", "max_hamming",
                   "expected_down_m", "down_tolerance_m", "expected_count")
+    _check(all(abs(v) <= 0.5 for v in t.camera_pos_m),
+           f"tags.camera_forward_m/right_m/down_m must be within 0.5 m (got {t.camera_pos_m})")
+    _check(0 <= c.max_frame_pose_gap_ms <= 1000,
+           "camera.max_frame_pose_gap_ms must be 0-1000")
     _check(0.0 <= t.camera_pitch_deg <= 90.0,
            f"tags.camera_pitch_deg must be between 0 and 90 (got {t.camera_pitch_deg})")
     _check(t.max_down_m > t.min_down_m,

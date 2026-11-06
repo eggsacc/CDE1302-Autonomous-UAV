@@ -31,12 +31,15 @@ def r_body_cam(pitch_deg: float) -> np.ndarray:
                      [0.0, math.cos(p), math.sin(p)]])
 
 
-def camera_to_body(t, pitch_deg: float) -> tuple[float, float, float]:
-    """A camera-frame point as (forward, right, down) from the drone centre (m)."""
-    return tuple(float(v) for v in r_body_cam(pitch_deg) @ np.asarray(t) + np.asarray(CAM_POS_M))
+def camera_to_body(t, pitch_deg: float, cam_pos=CAM_POS_M) -> tuple[float, float, float]:
+    """A camera-frame point as (forward, right, down) from the drone centre (m).
+
+    cam_pos: lens position in the body frame (tags.camera_pos_m in config.yaml).
+    """
+    return tuple(float(v) for v in r_body_cam(pitch_deg) @ np.asarray(t) + np.asarray(cam_pos))
 
 
-def body_to_camera(body, pitch_deg: float) -> tuple[float, float, float]:
+def body_to_camera(body, pitch_deg: float, cam_pos=CAM_POS_M) -> tuple[float, float, float]:
     """The inverse of camera_to_body."""
     return tuple(float(v) for v in r_body_cam(pitch_deg).T
-                 @ (np.asarray(body) - np.asarray(CAM_POS_M)))
+                 @ (np.asarray(body) - np.asarray(cam_pos)))

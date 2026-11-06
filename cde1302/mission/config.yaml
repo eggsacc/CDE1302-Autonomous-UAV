@@ -67,6 +67,9 @@ flight:
   tick_hz: 10.0            # state machine tick rate (Hz)
   stop_when_all_found: true  # return home as soon as tags.expected_count tags are confirmed
   land_settle_s: 6.0       # after CMD_LAND, wait this long before calling the mission done (s)
+  land_radius_m: 0.05      # back home: land only once within this of the start point... (m)
+  land_hold_s: 1.0         # ...for this long (s)
+  land_settle_max_s: 10.0  # land anyway after waiting this long over home (s)
 
 safety:
   stale_timeout_s: 10.0        # abort-land if telemetry is older than this (s). The drone plays a
@@ -78,10 +81,16 @@ camera:
   fps: 0                       # stream rate 1-15 fps; 0 = firmware default (10)
   quality: 0                   # JPEG quality 10-90; 0 = firmware default (60)
   capture_latency_bias_s: 0.0  # extra shift of the estimated capture time, earlier (s)
+  use_frame_pose: true         # place tags with the pose the drone paired with each frame
+                               # (no Wi-Fi delay); false = laptop timing + latency bias
+  max_frame_pose_gap_ms: 100   # ignore a frame pose this far from a PX4 sample (ms)
 
 tags:
   tag_size_m: 0.12             # edge of the BLACK square, not the paper (m); course tags are 120 mm
   camera_pitch_deg: 90.0       # lens below the horizon: 90 = straight down, 45 = the old mount (deg)
+  camera_forward_m: 0.08       # lens position from the drone centre: forward (m) - MEASURE
+  camera_right_m: 0.0          #   right (m)
+  camera_down_m: 0.0           #   down (m)
   min_decision_margin: 55.0    # detector gate, same as firmware (unitless)
   max_hamming: 1               # detector gate, same as firmware (bits)
   max_pose_err: 0.5            # reject poses with reprojection error above this (unitless)

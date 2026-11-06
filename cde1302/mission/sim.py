@@ -505,7 +505,8 @@ class SimTagSource:
         return len(due)
 
     def _detection(self, tag_id: int, body: tuple[float, float, float]) -> Detection:
-        t = body_to_camera(body, self.settings.tags.camera_pitch_deg)
+        t = body_to_camera(body, self.settings.tags.camera_pitch_deg,
+                           self.settings.tags.camera_pos_m)
         return Detection(id=tag_id, hamming=0, decision_margin=200.0,
                          centre=(160.0, 120.0), corners=((0.0, 0.0),) * 4,
                          pose_valid=True, t=t, R=tuple(np.eye(3).ravel()),

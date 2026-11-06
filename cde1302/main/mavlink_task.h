@@ -121,6 +121,13 @@ void mavlink_send_land_command(void);
 // Thread-safe snapshot — safe to call from any task.
 drone_state_t mavlink_get_state(void);
 
+// Drone pose at esp_timer time t_us (e.g. a camera frame's capture time),
+// interpolated from recent LOCAL_POSITION_NED samples on the same clock.
+// heading: rad in [-pi, pi), 0 = North, clockwise positive; yaw_rate: rad/s;
+// gap_ms: distance to the nearest sample used.  False if t_us is not covered.
+bool mavlink_pose_at(int64_t t_us, float *x, float *y, float *heading,
+                     float *yaw_rate, int32_t *gap_ms);
+
 // Convenience: true if we have received position data recently (< 500ms)
 bool mavlink_position_valid(void);
 

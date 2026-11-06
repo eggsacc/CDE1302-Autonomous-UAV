@@ -219,6 +219,7 @@ class Mission:
         self._start_requested = False
         self._hover_ok = False
         self._recent: deque[tuple[float, float, float]] = deque()
+        self._settle_t: Optional[float] = None   # returning: when the drone got home
         self._next_status = 0.0
         self.reached: list[int] = []            # waypoint indices reached
         self.timeouts: list[int] = []           # waypoint indices that timed out
@@ -604,25 +605,52 @@ class Mission:
         self.job = self._new_traj("return home", (p.x, p.y), [self.home], now)
 
     def _tick_returning(self, now: float) -> None:
+        if self._settle_t is not None:
+            self._tick_settling(now)
+            return
         if self.use_trajectory:
             result = self._update_traj(now)
             if result is None:
                 return
-            if result != "done":
-                self.drone.send_hold()
             self.job = None
-            self._report_and_land("search complete" if result == "done"
-                                  else f"return trajectory {result}, landing in place")
-            self._set_phase(Phase.LANDING)
-            return
-        result = self._update_leg(now)
-        if result is None:
-            return
-        if result == "timeout":
+            arrived = result == "done"
+            why = f"return trajectory {result}, landing in place"
+        else:
+            result = self._update_leg(now)
+            if result is None:
+                return
+            self.leg = None
+            arrived = result == "arrived"
+            why = "return timeout, landing in place"
+        if not arrived:
             self.drone.send_hold()
-        self.leg = None
-        self._report_and_land("search complete" if result == "arrived"
-                              else "return timeout, landing in place")
+            self._land_home(why)
+            return
+        # The firmware keeps the home setpoint: wait until the drone sits on it.
+        self._settle_t = now
+        self._recent.clear()
+
+    def _tick_settling(self, now: float) -> None:
+        """Land only once the drone has stayed within land_radius_m of home for
+        land_hold_s, or after land_settle_max_s whatever it does."""
+        f = self.settings.flight
+        p = self.drone.latest_pose()
+        self._recent.append((now, p.x, p.y))
+        while self._recent and now - self._recent[0][0] > f.land_hold_s:
+            self._recent.popleft()
+        span = self._recent[-1][0] - self._recent[0][0]
+        hx, hy = self.home
+        err = math.hypot(p.x - hx, p.y - hy)
+        if span >= f.land_hold_s - 1e-6 and all(
+                math.hypot(x - hx, y - hy) <= f.land_radius_m for _, x, y in self._recent):
+            self._land_home(f"search complete, {err * 100:.0f} cm from home")
+        elif now - self._settle_t >= f.land_settle_max_s:
+            self._land_home(f"search complete, not settled within {f.land_radius_m * 100:.0f} cm "
+                            f"after {f.land_settle_max_s:.0f} s ({err * 100:.0f} cm from home)")
+
+    def _land_home(self, reason: str) -> None:
+        self._settle_t = None
+        self._report_and_land(reason)
         self._set_phase(Phase.LANDING)
 
     def _tick_landing(self, now: float) -> None:

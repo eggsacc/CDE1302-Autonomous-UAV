@@ -87,8 +87,9 @@ def test_full_sweep_visits_all_waypoints_returns_lands_and_confirms_all_tags(tmp
     m, d = r.m, r.drone
     assert m.exit_code == 0
     assert m.reached == list(range(len(m.waypoints))) and m.timeouts == []
-    # Back home and landed.
-    assert math.hypot(d.x - m.home[0], d.y - m.home[1]) <= s.flight.arrival_radius_m
+    # Back home, settled within land_radius_m, and landed.
+    assert math.hypot(d.x - m.home[0], d.y - m.home[1]) <= s.flight.land_radius_m + 0.01
+    assert "cm from home" in r.events("LAND_CMD")[0]["details"]
     assert d.alt == 0.0 and not d.armed
     # Every tag confirmed, within a few cm of the truth.
     truth = {t.id: (t.x, t.y) for t in s.sim.true_tags}
@@ -110,6 +111,22 @@ def test_full_sweep_visits_all_waypoints_returns_lands_and_confirms_all_tags(tmp
         assert len(list(csv.DictReader(fh))) == 6
     with open(folder / "trajectory.csv", newline="", encoding="utf-8") as fh:
         assert len(list(csv.DictReader(fh))) > 500
+
+
+def test_lands_anyway_if_it_never_settles_over_home(tmp_path):
+    # The sim drone holds its setpoint perfectly, so shift the mission's idea of
+    # home by 20 cm once it starts waiting: the drone then never gets within 5 cm.
+    r = Rig(configure(tmp_path, flight={"land_settle_max_s": 3.0}))
+    r.until(lambda: r.m.phase == Phase.READY, 5)
+    r.m.command("takeoff")
+    assert r.until(lambda: r.m._settle_t is not None, 600)
+    r.m.home = (r.m.home[0] + 0.2, r.m.home[1])
+    t0 = r.clock()
+    assert r.until(lambda: r.m.land_sent, 10)
+    assert r.clock() - t0 == pytest.approx(3.0, abs=0.3)
+    assert "not settled" in r.events("LAND_CMD")[0]["details"]
+    r.finish()
+    assert r.m.exit_code == 0 and r.drone.alt == 0.0
 
 
 def test_early_stop_when_all_tags_found(tmp_path):

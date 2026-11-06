@@ -13,6 +13,7 @@ idf_component_register(
         "uwb_debug_pack.c"
         "uwb_px4.c"
         "traj_gate.c"
+        "pose_hist.c"
         "uwb_task.c"
     INCLUDE_DIRS "."
     REQUIRES

@@ -29,6 +29,7 @@ body uses tags.camera_pitch_deg (camera_mount.py), not Detection.t_body's 45 deg
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import math
 import select
@@ -49,6 +50,8 @@ from protocol import build_camera_stream_command
 
 from camera_mount import camera_to_body
 from drone_link import Pose
+from frame_pose import FramePose, parse_frame_pose
+from geometry import wrap_angle
 from geometry import body_to_ned
 from settings import Settings, Tags
 from sighting import Sighting
@@ -88,14 +91,19 @@ class TagFilter:
         self._max_yaw_rate = math.radians(tags.max_yaw_rate_deg_s)
 
     def evaluate(self, det: Detection, t_capture: float, t_detect: float,
-                 poses: PoseSource) -> tuple[Optional[Sighting], Optional[str]]:
-        """Returns (sighting, None) if accepted, else (None, reason)."""
+                 poses: PoseSource, frame_pose: Optional[FramePose] = None
+                 ) -> tuple[Optional[Sighting], Optional[str]]:
+        """Returns (sighting, None) if accepted, else (None, reason).
+
+        frame_pose: the drone pose the ESP32 paired with this frame on its own
+        clock.  Used instead of the laptop's pose history when given.
+        """
         c = self.cfg
         if not passes_gate(det, c.min_decision_margin, c.max_hamming):
             return None, R_GATE
         if det.t is None or det.pose_err is None:
             return None, R_NO_POSE
-        body = camera_to_body(det.t, c.camera_pitch_deg)
+        body = camera_to_body(det.t, c.camera_pitch_deg, c.camera_pos_m)
         if det.pose_err > c.max_pose_err:
             return None, R_POSE_ERR
         if det.range_m > c.max_detect_range_m:
@@ -105,10 +113,17 @@ class TagFilter:
                 return None, R_HEIGHT
         elif not c.min_down_m <= body[2] <= c.max_down_m:
             return None, R_HEIGHT
-        drone = poses.pose_at(t_capture)
-        if drone is None:
-            return None, R_NO_DRONE
-        rate = poses.yaw_rate_at(t_capture)
+        if frame_pose is not None:
+            laptop = poses.pose_at(t_capture)        # only for nav_state
+            drone = Pose(t_capture, frame_pose.x, frame_pose.y,
+                         wrap_angle(frame_pose.heading),
+                         laptop.nav_state if laptop is not None else 0)
+            rate = frame_pose.yaw_rate
+        else:
+            drone = poses.pose_at(t_capture)
+            if drone is None:
+                return None, R_NO_DRONE
+            rate = poses.yaw_rate_at(t_capture)
         if rate is not None and abs(rate) > self._max_yaw_rate:
             return None, R_YAW_RATE
         x, y = body_to_ned(body[0], body[1], drone.x, drone.y, drone.heading)
@@ -137,7 +152,8 @@ class CameraView:
 
 def process_gray(gray: np.ndarray, detector: Detector, tag_filter: TagFilter,
                  poses: PoseSource, t_capture: float, t_detect: float,
-                 marks: Optional[list[TagMark]] = None
+                 marks: Optional[list[TagMark]] = None,
+                 frame_pose: Optional[FramePose] = None
                  ) -> tuple[list[Sighting], list[tuple[int, str]]]:
     """Detect tags in one grayscale frame.
 
@@ -146,7 +162,7 @@ def process_gray(gray: np.ndarray, detector: Detector, tag_filter: TagFilter,
     """
     accepted, rejected = [], []
     for det in detector.detect(gray):
-        s, reason = tag_filter.evaluate(det, t_capture, t_detect, poses)
+        s, reason = tag_filter.evaluate(det, t_capture, t_detect, poses, frame_pose)
         if s is not None:
             accepted.append(s)
         else:
@@ -160,6 +176,7 @@ def process_gray(gray: np.ndarray, detector: Detector, tag_filter: TagFilter,
 class PipelineStats:
     """Counters since start(); read with TagPipeline.stats()."""
     frames: int = 0                 # frames decoded and searched
+    frame_pose: int = 0             # of those, placed with the drone's own pose
     bad_jpeg: int = 0               # frames that failed to decode
     dropped: int = 0                # frames lost/incomplete (FrameAssembler)
     detections: int = 0             # raw detections
@@ -169,13 +186,12 @@ class PipelineStats:
     last_age_ms: Optional[int] = None
 
     def copy(self) -> "PipelineStats":
-        return PipelineStats(self.frames, self.bad_jpeg, self.dropped, self.detections,
-                             self.accepted, Counter(self.rejected), self.last_frame_t,
-                             self.last_age_ms)
+        return dataclasses.replace(self, rejected=Counter(self.rejected))
 
     def summary(self) -> str:
         rej = ", ".join(f"{k} {v}" for k, v in self.rejected.most_common()) or "none"
-        return (f"{self.frames} frames ({self.dropped} dropped, {self.bad_jpeg} bad), "
+        return (f"{self.frames} frames ({self.dropped} dropped, {self.bad_jpeg} bad, "
+                f"{self.frame_pose} with drone pose), "
                 f"{self.detections} detections, {self.accepted} accepted; "
                 f"rejected: {rej}")
 
@@ -338,13 +354,18 @@ class TagPipeline:
                 self._stats.bad_jpeg += 1
             return
         t_cap = capture_time(first_rx, age_ms, self.settings.camera.capture_latency_bias_s)
+        cam = self.settings.camera
+        fp = parse_frame_pose(jpeg) if cam.use_frame_pose else None
+        if fp is not None and fp.gap_ms > cam.max_frame_pose_gap_ms:
+            fp = None
         marks: list[TagMark] = []
         accepted, rejected = process_gray(gray, self._detector, self._filter,
-                                          self._poses, t_cap, self._clock(), marks)
+                                          self._poses, t_cap, self._clock(), marks, fp)
         with self._stats_lock:
             self._view = CameraView(gray, t_cap, tuple(marks), age_ms)
             st = self._stats
             st.frames += 1
+            st.frame_pose += fp is not None
             st.detections += len(accepted) + len(rejected)
             st.accepted += len(accepted)
             st.rejected.update(reason for _, reason in rejected)

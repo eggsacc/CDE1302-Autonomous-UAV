@@ -1,4 +1,5 @@
 #include "mavlink_task.h"
+#include "pose_hist.h"
 
 // MAVLink — header-only, common dialect covers everything PX4 needs.
 // Do NOT define MAVLINK_USE_CONVENIENCE_FUNCTIONS — that path requires a
@@ -121,6 +122,10 @@ static uint32_t      s_sp_update_ms;   // timestamp of last setpoint update
 
 static SemaphoreHandle_t s_sp_mutex;
 static SemaphoreHandle_t s_state_mutex;
+/* PX4 positions on the esp_timer clock, for pairing camera frames (pose_hist.h).
+ * Guarded by s_state_mutex.  Zero-initialised = empty. */
+static pose_hist_t s_pose_hist;
+#define MAV_POSE_MAX_EXTRAP_US 100000
 
 static void clamp_vec2_to_speed(float *vx, float *vy, float max_speed)
 {
@@ -507,6 +512,11 @@ static void parse_incoming(void)
                 s_state.vx = pos.vx;  s_state.vy = pos.vy;  s_state.vz = pos.vz;
                 s_state.enu_z     = -pos.z;   // NED z-down → ENU z-up
                 s_state.last_pos_ms = now_ms;
+                if (s_state.last_att_ms != 0) {
+                    pose_sample_t ps = { .t_us = esp_timer_get_time(), .x = pos.x,
+                                         .y = pos.y, .heading = s_state.heading };
+                    pose_hist_push(&s_pose_hist, &ps);
+                }
                 xSemaphoreGive(s_state_mutex);
                 break;
             }
@@ -741,6 +751,24 @@ void mavlink_set_offboard_mode(void)
 void mavlink_send_land_command(void)
 {
     send_land();
+}
+
+bool mavlink_pose_at(int64_t t_us, float *x, float *y, float *heading,
+                     float *yaw_rate, int32_t *gap_ms)
+{
+    pose_sample_t p;
+    float rate = 0.0f;
+    int64_t gap = 0;
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    bool ok = pose_hist_at(&s_pose_hist, t_us, MAV_POSE_MAX_EXTRAP_US, &p, &rate, &gap);
+    xSemaphoreGive(s_state_mutex);
+    if (!ok) return false;
+    *x = p.x;
+    *y = p.y;
+    *heading = p.heading;
+    *yaw_rate = rate;
+    *gap_ms = (int32_t)(gap / 1000);
+    return true;
 }
 
 drone_state_t mavlink_get_state(void)
