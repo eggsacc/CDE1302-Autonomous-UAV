@@ -1,232 +1,217 @@
-# esp-everything-qgc-bridge
+# CDE1302 UWB testing
 
-ESP32-S3 companion-computer firmware for CDE1302.
-It consists of ESP32 firmware in `main/` and laptop-side Python scripts in `laptop/`.
+ESP32-S3 firmware (`main/`) and laptop scripts (`laptop/`) for flying the
+CDE1302 drone with UWB position (Nooploop LinkTrack). PX4 fuses the UWB position
+with its optical flow, and the laptop sends goals and sweeps over Wi-Fi.
 
-Note that the example drone ID in this README is 22 (it's indicated as [drone ID] in some places). You need to change it to your drone's ID when running the scripts.
+How the UWB method works, and more detail on each script:
+[laptop/UWB_README.md](laptop/UWB_README.md).
 
-## 1. Setup ESP32 (Optional)
+Commands are run from this folder (`cde1302/`) unless stated otherwise. The
+examples use drone ID **2**.
 
-You can skip this if you only want to run the laptop scripts. The ESP32 firmware has already been built and flashed onto the drone's ESP32-S3.
+## 1. Hardware
 
-In this step, you need an internet connection to build and close the QGroundControl app if it is running. The ESP32-S3 must be connected to the laptop via USB.
+- CDE1302 drone: PX4 1.15.4 flight controller (no compass), optical flow and
+  range sensor, XIAO ESP32-S3 Sense connected to PX4 over UART.
+- LinkTrack P-AS2 UWB tag on the drone, plus 4 anchors set up in NAssistant.
+- Wiring: UWB tag **TX → ESP32 D10 (GPIO 9)**, GND → GND, tag powered from
+  3.6–5.5 V.
+- A laptop and a 2.4 GHz Wi-Fi network (router or hotspot).
 
-Everything this firmware needs is committed in-tree (MAVLink `c_library_v2`,
-esp-apriltag, the VL53L5CX driver and `managed_components/`). The only external
-dependency is ESP-IDF itself:
+## 2. Install ESP-IDF (once)
+
+The firmware needs one exact ESP-IDF version (`tools/idf-pin.env`). Install it
+once per laptop.
+
+**Windows:** run in PowerShell (about 1 GB download, 10–30 min):
+
+```bash
+powershell -ExecutionPolicy Bypass -File tools\install_idf_pinned.ps1
+```
+
+It installs to `C:\esp\idf-pinned` and `C:\Espressif\tools-pinned`, separate
+from any other ESP-IDF.
+
+**macOS / Linux:**
 
 ```bash
 git clone https://github.com/espressif/esp-idf.git ../esp-idf
-cd ../esp-idf && git checkout "$(sed -n 's/^IDF_CHECKOUT_REF=//p' ../esp-everything-qgc-bridge/tools/idf-pin.env)"
+cd ../esp-idf
+git checkout "$(sed -n 's/^IDF_CHECKOUT_REF=//p' ../cde1302/tools/idf-pin.env)"
 git submodule update --init --recursive
-./install.sh esp32s3          # ~2 GB of toolchain into ~/.espressif
+./install.sh esp32s3
 cd -
 ```
 
-See `tools/idf-pin.env` for the pinned version and why it matters.
+## 3. Set up the network
 
-### Build and flash a drone
+The drone joins your Wi-Fi with a fixed IP and sends everything to one laptop
+IP. Both are built into the firmware.
 
-For example, let drone ID = 22 and the ESP32-S3 is on `/dev/tty.usbmodem2101` (default MacBook Pro USB-C port):
+1. Start the network. It must be **2.4 GHz** (the ESP32 can't use 5 GHz).
+   - **Windows Mobile Hotspot:** Settings → Network & internet → Mobile hotspot.
+     Set the band to 2.4 GHz. The laptop is then always `192.168.137.1`.
+   - **Router:** connect the laptop to it.
+2. Find the laptop's IP and the gateway: `ipconfig` (Windows) or `ifconfig`
+   (macOS / Linux).
+3. Set these in `sdkconfig` (or `idf.py menuconfig` → Drone Configuration):
 
-`flash_drone.sh` pins `CONFIG_DRONE_ID` and `CONFIG_HOST_IPV4_ADDR`
-(host IP = `192.168.1.<100 + drone id>`) into `sdkconfig`, builds, verifies the
-generated header really is that drone, flashes, then restores `sdkconfig`:
+   | Setting | Windows hotspot | Router (example) |
+   |---|---|---|
+   | `CONFIG_WIFI_SSID` | your hotspot name | your router name |
+   | `CONFIG_WIFI_PASSWORD` | your hotspot password | your router password |
+   | `CONFIG_HOST_IPV4_ADDR` (laptop) | `192.168.137.1` | `192.168.1.102` |
+   | `CONFIG_DRONE_STATIC_IPV4_ADDR` | `192.168.137.202` | `192.168.1.202` |
+   | `CONFIG_WIFI_GATEWAY_IPV4_ADDR` | `192.168.137.1` | `192.168.1.1` |
+   | `CONFIG_WIFI_NETMASK_IPV4_ADDR` | `255.255.255.0` | `255.255.255.0` |
+   | `CONFIG_DRONE_ID` | `2` | `2` |
 
-```bash
-./flash_drone.sh                           # prompts for drone ID and port
-./flash_drone.sh 22                        # prompts for the port
-./flash_drone.sh 22 /dev/tty.usbmodem2101  # non-interactive
-```
+   The drone IP must be on the same network as the laptop and unused.
 
-It finds ESP-IDF automatically (`$IDF_PATH`, `./esp-idf`, `../esp-idf`,
-`~/esp/esp-idf`, `~/esp-idf`), sourcing `export.sh` only if needed.
+## 4. Flash the ESP32
 
-### Deterministic drone addresses
+The UWB settings are already on in `sdkconfig` (UWB on GPIO 9 at 921600 baud,
+debug stream to the laptop, UWB sent to PX4). Plug the ESP32 into the laptop with
+USB and close QGroundControl and any serial monitor.
 
-`flash_drone.sh` asks for the drone ID when no ID argument is supplied and
-builds the firmware with this mapping:
-
-```text
-drone IPv4 address = 192.168.1.(200 + drone ID)
-```
-
-For example, drone 9 is `192.168.1.209` and drone 22 is
-`192.168.1.222`. This is separate from `CONFIG_HOST_IPV4_ADDR`: the flash
-script retains the existing QGC/laptop mapping `192.168.1.(100 + drone ID)`.
-After flashing, it prints the exact `camera_stream.py --esp-ip ...` command.
-The WiFi router must use gateway `192.168.1.1` with netmask
-`255.255.255.0`.
-
-## 2. Setup (Laptop)
-
-You can choose one of the following two options to install the laptop-side Python scripts and dependencies:
-
-### Pip install (Python 3.10+)
-
-Laptop side (Python 3.10+), with pip:
+**Windows** (PowerShell, in this folder):
 
 ```bash
-python3 -m pip install -r laptop/requirements.txt
+. .\tools\idf_pinned.ps1
 ```
 
-or in a conda environment (below), which brings its own Python, so it also
-works on a machine whose Python is too old or shared with other projects.
+```bash
+idf.py -p COM18 build flash monitor
+```
 
-### Conda environment
+Replace `COM18` with your port (Device Manager → Ports).
 
-`laptop/environment.yml` creates an environment named `cde1302-laptop` with
-Python 3.12 and the packages from `laptop/requirements.txt`. Every package
-installs prebuilt binaries on 64-bit Windows, Linux with glibc 2.27+ (Ubuntu 18.04+),
-and macOS 13+ (14+ on an Intel Mac); older systems fall back to compiling
-OpenCV or SciPy from source.
+**macOS / Linux:**
 
-1. Install conda once per machine. An existing Anaconda or Miniconda works;
-   on a new machine, install Miniforge (on Windows, see [Windows](#windows-havent-tested-yet)):
+```bash
+. ../esp-idf/export.sh
+```
+
+```bash
+idf.py -p /dev/tty.usbmodem2101 build flash monitor
+```
+
+Every 2 s the monitor should show the UWB tag, for example
+`... id 0: pos (3.230, 4.400, 0.120) m ...`, and `anchors 4/4`. `Ctrl+]` leaves
+the monitor.
+
+## 5. Set up the laptop
+
+1. Install conda once. **Windows:** install Miniforge from
+   <https://github.com/conda-forge/miniforge/releases/latest> and use "Miniforge
+   Prompt". **macOS / Linux:**
 
    ```bash
    curl -LO "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
-   bash "Miniforge3-$(uname)-$(uname -m).sh"   # answer yes when it offers to initialize conda
+   bash "Miniforge3-$(uname)-$(uname -m).sh"
    ```
 
-   Then open a new terminal. If `conda activate` later says to run
-   `conda init`, run `conda init zsh` (or `bash`) and open a new terminal.
-
-2. Create the environment once from the repo root:
+2. Create the environment (once):
 
    ```bash
    conda env create -f laptop/environment.yml
    ```
 
-3. Activate it in every new terminal before running the scripts:
+3. Activate it in every new terminal:
 
    ```bash
    conda activate cde1302-laptop
-   python laptop/tag_stream.py --esp-ip 192.168.1.222   # for example
-   conda deactivate                          # when done
    ```
 
-After `laptop/requirements.txt` changes, update the environment with
-`conda env update -f laptop/environment.yml`. The laptop tests run with
-`cd laptop && python -m pytest tests`.
+4. **Windows only:** allow Python through the firewall. In PowerShell **as
+   administrator**, with the path of your environment's `python.exe`:
 
-### C compiler
-
-`tag_stream.py` compiles the drone's AprilTag detector on its first run, so
-it needs a C compiler: `xcode-select --install` on macOS,
-`sudo apt install build-essential` on Ubuntu. For Windows, see step 3 of
-[Windows](#windows-havent-tested-yet).
-
-### Windows (Haven't tested yet)
-
-Follow the conda steps above, with these changes:
-
-1. **Folders:** put the repo and conda in paths with only English letters
-   and no spaces, e.g. `C:\cde1302` and `C:\miniforge3`. The compiler in
-   step 3 can't handle other paths.
-2. **Installing conda:** run `Miniforge3-Windows-x86_64.exe` from
-   <https://github.com/conda-forge/miniforge/releases/latest> and type every
-   command in "Miniforge Prompt" from the Start menu ("Anaconda Prompt" with
-   Anaconda). Don't use WSL: its default networking never passes the drones'
-   packets on.
-3. **C compiler:** after creating the environment, install MinGW-w64 gcc into
-   it (about 110 MB; Visual Studio's compiler won't work) and check the build:
-
-   ```bat
-   conda activate cde1302-laptop
-   conda install -c conda-forge gcc
-   python laptop/apriltag_host.py
+   ```bash
+   New-NetFirewallRule -DisplayName "CDE1302 Python UDP" -Direction Inbound -Program "C:\conda-envs\cde1302-laptop\python.exe" -Protocol UDP -Action Allow -Profile Any
    ```
 
-   It should print `tag16h5 ncodes = 22 (expected 22)`.
-4. **`python`, not `python3`:** conda's Python on Windows has no `python3`
-   command, so type `python` wherever this README says `python3`.
-5. **Firewall:** the drones send telemetry and video to the laptop unprompted,
-   so allow Python through Windows Defender Firewall when it asks, and set
-   the drone Wi-Fi to a Private network. It asks once per environment; if you
-   clicked Cancel, remove the block rule under "Allow an app through
-   firewall".
+   Run `where python` with the environment active to find the path.
 
-### Laptop IP address
+5. Check that the UWB code works (no drone needed):
 
-The drones send MAVLink, telemetry, and ToF debug data to
-`192.168.1.(100 + drone ID)` (set when flashing), so the QGroundControl or
-mission laptop must hold that address on the drone Wi-Fi. Camera video follows
-the source IP of the latest `camera_stream.py` or `tag_stream.py` keepalive and
-can therefore be viewed from another laptop on the same Wi-Fi. The small
-AprilTag debug stream is also copied to that viewer when
-`tag_stream_legacy.py` uses `--detail`.
+   ```bash
+   cd laptop
+   python -m pytest tests/test_uwb_calibration.py tests/test_uwb_set_goal.py tests/test_uwb_frame_goal.py tests/test_uwb_lawnmower.py
+   cd ..
+   ```
 
-## 3. ESP32 camera preview
+## 6. Set up PX4 and the UWB module
 
-View a drone's camera over WiFi (drone IP = `192.168.1.(200 + drone ID)`; here the example drone ID is 22, so the drone IP becomes 192.168.1.222):
+**PX4** (QGroundControl → Vehicle Setup → Parameters). Reboot PX4 afterwards.
 
-```bash
-python3 laptop/camera_stream.py --esp-ip 192.168.1.222 [--fps 10] [--quality 60]
-```
+| Parameter | Value | Why |
+|---|---|---|
+| `EKF2_EV_CTRL` | 1 | use UWB horizontal position |
+| `EKF2_EV_NOISE_MD` | 0 | use the noise the ESP32 sends with each reading |
+| `EKF2_EVP_NOISE` | 0.15 | |
+| `EKF2_EVP_GATE` | 3 | |
+| `EKF2_EV_DELAY` | 50 | |
+| `EKF2_EV_POS_X`, `_Y`, `_Z` | -0.04, 0, 0.03 | tag position on the drone (m) |
+| `EKF2_MAG_TYPE` | None | no compass |
+| `EKF2_OF_CTRL` | 1 | optical flow on |
+| `EKF2_HGT_REF` | Range sensor | |
+| `MPC_XY_VEL_MAX` | 0.3 to start | top speed for waypoint flights |
 
-`s` saves a frame.
+**UWB module** (NAssistant): tag role TAG, protocol NODE_FRAME2, 50 Hz,
+921600 baud. Set up the 4 anchors, and note which way **UWB +x** points (from A0
+to the anchor at y = 0).
 
-With AprilTags drawn on the frame:
-```bash
-python3 laptop/tag_stream.py --esp-ip 192.168.1.222
-```
+## 7. Fly
 
-For tuning, use `tag_stream_legacy.py --detail` (or `d` while it runs): it adds
-rejected tags, a HUD and the drone's own detections.
+All flights use the UWB anchors as the coordinate system, so **line up the drone
+before powering PX4**: put it on the start spot, nose along a UWB axis, then plug
+in the battery. Don't rotate it afterwards. Tell the scripts which way the nose
+points:
 
-For both commands, `q`/Esc quits. The drone streams only while the viewer
-runs (~9 fps, ~130 ms from capture to the laptop on the OV3660). The overlay
-and the console show the drone-side frame age and dropped frames.
+| Nose points along | `--nose-deg` |
+|---|---|
+| UWB +x | 0 |
+| UWB +y | 90 |
+| UWB −x | 180 |
+| UWB −y | -90 |
 
-Only one camera destination is active at a time: if viewers on two laptops
-send keepalives, the most recent keepalive wins. The Wi-Fi access point must
-allow client-to-client traffic, and the viewer firewall must allow Python to
-receive UDP 5008 and 5009. MAVLink remains on `CONFIG_HOST_IPV4_ADDR` while a
-different laptop is viewing the camera.
+Every script takes `--confirm`: it checks everything on the ground first and asks
+you to type a code before takeoff. Type anything else to cancel. Ctrl+C in the
+air lands the drone.
 
-## 4. Simple arming and takeoff (Lab 5)
-
-`--drone-id` (required) is the ID flashed into the ESP32. The camera/AprilTag
-pipeline (section 3) never affects flights: tags are only detected and reported.
-
-Check the communication without sending flight commands.
-```bash
-python3 laptop/simple_arm_takeoff_land.py --monitor-only --drone-id [DRONE_ID]
-```
-
-Takeoff -> hover at 0.5 m altitude -> land. The altitude is `CRUISE_ALT_M` in the ESP32 firmware (`main/main.c`; keep `WIFI_CRUISE_ALT_M` in `main/wifi_task.c` equal).
-```bash
-python3 laptop/simple_arm_takeoff_land.py --drone-id [DRONE_ID]
-```
-Type `ARM-[drone ID]` when prompted.
-
-Full procedure: [laptop/TEST_GUIDE.md](laptop/TEST_GUIDE.md).
-
-## 5. Send a waypoint mission (Lab 5)
+**Check the link** (no flight):
 
 ```bash
-python3 laptop/simple_waypoint_mission.py \
-  --waypoints-file waypoints/waypoints_example.txt --confirm \
-  --drone-id [DRONE_ID]
+python laptop/simple_arm_takeoff_land.py --monitor-only --drone-id 2
 ```
 
-`--confirm` asks for `MISSION-[drone ID]`; without it, the drone takes off as
-soon as telemetry arrives. Waypoints are `x,y` metres (x = north, y = east) from
-PX4's local origin, plus the drone's start offset in `laptop/setup.yaml` if listed.
-
-Full procedure: [waypoints/WAYPOINT_FLIGHT_TEST_GUIDE.md](waypoints/WAYPOINT_FLIGHT_TEST_GUIDE.md).
-
-## 6. Fly from a CSV trajectory
-
-This is a 2x1 ellipse minimum-snap trajectory. Put the drone at the tip of the major axis, facing outward. The takeoff placement can be seen in `trajectory/ellipse_start_placement.png`.
+**Fly to one goal.** The goal is in metres from the takeoff spot, along the UWB
+axes:
 
 ```bash
-python3 laptop/send_trajectory.py --takeoff --takeoff-wait 12 \
-  --trajectory trajectory/ellipse_min_snap_traj.csv --confirm \
-  --drone-id [DRONE_ID]
+python laptop/simple_uwb_frame_goal.py --drone-id 2 --nose-deg -90 --goal 0.0 -1.0 --confirm
 ```
 
-`--confirm` asks for `TRAJ-[drone ID]` before anything is sent.
+**Lawnmower sweep**, stopping at each corner. Bounds are in metres from the takeoff spot:
 
-See `trajectory/README.md` for the included circle and compact minimum-snap ellipse, how to regenerate their CSV files, and the space each path needs.
+```bash
+python laptop/simple_uwb_lawnmower.py --drone-id 2 --nose-deg -90 --xmin -0.5 --xmax 0.5 --ymin -3 --ymax 0 --confirm
+```
+
+Add `--track run.csv` to the sweep to save the flown UWB track.
+
+**Without lining up the drone:** `simple_uwb_calibration.py` flies a small square
+to measure the alignment instead, and `simple_uwb_set_goal.py` flies to a goal
+with it. See [laptop/UWB_README.md](laptop/UWB_README.md).
+
+## 8. Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `no telemetry from drone 2` | Laptop IP in `sdkconfig` is wrong, the drone isn't on the Wi-Fi (2.4 GHz?), or the firewall blocks Python |
+| `no usable UWB on UDP 5010` | Tag not powered or not wired to GPIO 9, anchors off, or no line of sight |
+| `PX4 did not move onto the UWB position` | `EKF2_EV_CTRL` isn't 1, PX4 wasn't rebooted, or the old firmware is still flashed |
+| Drone goes the wrong way sideways | `--nose-deg` doesn't match how the drone was powered up, or the anchor layout is mirrored (try `--mirror no`) |
+| Too fast or too slow | `MPC_XY_VEL_MAX` in QGroundControl |
+| `COM18` busy when flashing | Close QGroundControl and other serial monitors |

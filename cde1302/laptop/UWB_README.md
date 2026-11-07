@@ -239,8 +239,9 @@ than 5 m from takeoff are refused (`--max-distance`).
 
 **UWB module** (NAssistant): role TAG, protocol NODE_FRAME2, 50 Hz, 921600 baud.
 
-**Laptop:** on the drone router with IP 192.168.1.102. Windows Firewall must allow
-UDP 5010 in.
+**Laptop:** on the drone's Wi-Fi, with the IP flashed as `CONFIG_HOST_IPV4_ADDR`
+(see the main [README](../README.md)). Windows Firewall must allow Python to
+receive UDP.
 
 ## Troubleshooting
 
