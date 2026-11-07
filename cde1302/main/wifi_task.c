@@ -305,6 +305,33 @@ static void handle_traj_data(const uint8_t *buf, int len)
     nav_traj_put(buf[2], total, offset, buf + 8, n);
 }
 
+/* CMD_WAYPOINT: pkt, cmd, x, y, yaw (f32).  One position setpoint; PX4 flies to
+ * it on its own (speed set by MPC_XY_P and MPC_XY_VEL_MAX) holding the yaw.
+ * Stops any goal or trajectory.  The laptop resends it while waiting, so only
+ * a new target is logged. */
+static void handle_waypoint(const uint8_t *buf, int len)
+{
+    static float s_last_x = NAN, s_last_y = NAN;
+    if (len < 14) return;
+    if (s_phase != MISSION_FLYING) {
+        ESP_LOGW(TAG, "CMD_WAYPOINT ignored — not flying");
+        return;
+    }
+    float x, y, yaw;
+    memcpy(&x, buf + 2, sizeof x);
+    memcpy(&y, buf + 6, sizeof y);
+    memcpy(&yaw, buf + 10, sizeof yaw);
+    if (!isfinite(x) || !isfinite(y)) return;
+    if (!isfinite(yaw)) yaw = mavlink_get_state().heading;
+    nav_cancel();
+    mavlink_set_position_ned(x, y, -(WIFI_CRUISE_ALT_M), yaw);
+    if (x != s_last_x || y != s_last_y) {
+        ESP_LOGI(TAG, "CMD_WAYPOINT odom(%.2f,%.2f) yaw %.1f deg", x, y, yaw * 57.2958f);
+        s_last_x = x;
+        s_last_y = y;
+    }
+}
+
 /* CMD_TRAJ_START: pkt, cmd, id, dt_ms(u16) */
 static void handle_traj_start(const uint8_t *buf, int len)
 {
@@ -414,6 +441,8 @@ void wifi_task(void *arg)
                     handle_peers(cmd_buf, len);
                 } else if (cmd_buf[1] == CMD_UWB_ALIGN) {
                     uwb_handle_align_cmd(cmd_buf, len);
+                } else if (cmd_buf[1] == CMD_WAYPOINT) {
+                    handle_waypoint(cmd_buf, len);
                 } else if (len >= (int)sizeof(wifi_cmd_pkt_t)) {
                     handle_command((const wifi_cmd_pkt_t *)cmd_buf);
                 }

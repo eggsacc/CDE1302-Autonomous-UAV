@@ -35,17 +35,23 @@ import json
 import logging
 import math
 import random
+import struct
 import time
 from pathlib import Path
 
 import numpy as np
 
 from comms import CommsNode
-from protocol import CMD_LAND, CMD_START, NAV_TRAJ, CommandPacket, build_traj_packets, build_traj_start
+from protocol import (CMD_LAND, CMD_START, NAV_TRAJ, PKT_CMD, CommandPacket, build_traj_packets,
+                      build_traj_start)
 from simple_uwb_calibration import (DT_S, MIN_PAIRS, UPLOAD_GAP_S, UwbPairs, calibrate,
                                     send_alignment, square_path)
 
 log = logging.getLogger("uwb_set_goal")
+
+# One position setpoint that PX4 flies to by itself, holding the yaw (wifi_task.h).
+CMD_WAYPOINT = 0x0B
+WAYPOINT_CMD = struct.Struct("<BBfff")    # pkt, cmd, x, y (PX4 local), yaw (rad)
 
 
 def to_px4(al: dict, ux: float, uy: float) -> tuple[float, float]:
@@ -96,7 +102,8 @@ class Drone:
             time.sleep(0.05)
         return False
 
-    def fly(self, pts: np.ndarray, name: str) -> None:
+    def fly(self, pts: np.ndarray, name: str, show=None) -> None:
+        """show: optional (px4_x, px4_y) -> (label, x, y) for the progress log."""
         """Upload a trajectory, start it and wait until the ESP32 reports it done."""
         traj_id = random.randint(1, 255)
         packets = build_traj_packets(traj_id, pts)
@@ -113,9 +120,16 @@ class Drone:
             raise RuntimeError(f"drone refused the {name}")
         end = time.monotonic() + 4 * len(pts) * DT_S + 15.0   # the ESP waits for a slow drone
         while self.pkt.nav_state == NAV_TRAJ and time.monotonic() < end:
-            log.info("%s: pos (%+.2f, %+.2f)", name, *self.pos())
+            if show is None:
+                log.info("%s: PX4 pos (%+.2f, %+.2f)", name, *self.pos())
+            else:
+                log.info("%s: %s (%+.2f, %+.2f)", name, *show(*self.pos()))
             time.sleep(1.0)
         log.info("%s done, nav state %s", name, self.pkt.nav_state_name)
+
+    def waypoint(self, x: float, y: float, yaw: float) -> None:
+        """Send PX4 one position (its local frame) to fly to, holding yaw (rad)."""
+        self.comms.send_raw(self.id, WAYPOINT_CMD.pack(PKT_CMD, CMD_WAYPOINT, x, y, yaw))
 
     def start(self) -> None:
         self.comms.send_command(self.id, CommandPacket(CMD_START))

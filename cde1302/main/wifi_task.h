@@ -75,6 +75,8 @@ typedef struct __attribute__((packed)) {
 #define CMD_TRAJ_DATA     0x08   /* pkt, cmd, id, total(u16), offset(u16), n, n × (x,y,z) f32 */
 #define CMD_TRAJ_START    0x09   /* pkt, cmd, id, dt_ms(u16) */
 #define CMD_UWB_ALIGN     0x0A   /* pkt, cmd, flags, theta, tx, ty f32 (uwb_px4.h) */
+#define CMD_WAYPOINT      0x0B   /* pkt, cmd, x, y, yaw f32: PX4 local position (odom), PX4 flies
+                                  * there itself at cruise height; yaw NaN = current heading */
 
 /* Largest command datagram (a CMD_TRAJ_DATA chunk of 80 points is 968 B). */
 #define WIFI_CMD_BUF_SIZE 1024

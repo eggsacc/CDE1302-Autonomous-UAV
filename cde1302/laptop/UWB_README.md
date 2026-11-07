@@ -147,8 +147,12 @@ the UWB position**: PX4 x = UWB x, PX4 y = −UWB y. The script won't take off
 until PX4 has sat within 0.15 m of UWB for 2 s.
 
 ```bash
-python simple_uwb_frame_goal.py --drone-id 2 --goal 2.0 1.5 --confirm
+python simple_uwb_frame_goal.py --drone-id 2 --goal 1.0 0.0 --confirm
 ```
+
+The goal is **relative to the takeoff spot**, in metres along the UWB axes:
+`--goal 1.0 0.0` is 1 m along UWB +x from where the drone stands. The log and
+the result also show absolute UWB coordinates.
 
 **What it needs from you:** power up PX4 with the nose pointing along a known
 UWB direction, because PX4's heading 0 is the nose direction at power-up.
@@ -172,6 +176,48 @@ measures the angle instead of trusting it.
 `CMD_START`, so one sent on the ground is kept for that flight. After
 `CMD_START` the hold position is captured again, so OFFBOARD doesn't start on
 the pre-UWB spot. Reflash for this script; the other scripts work either way.
+
+## Lawnmower sweep: `simple_uwb_lawnmower.py`
+
+Same UWB frame as `simple_uwb_frame_goal.py` (line up the nose, `--nose-deg`),
+but it flies a lawnmower sweep. The bounds are **metres from the takeoff spot,
+along the UWB axes**. Lanes run along y and step across in x by `--spacing`
+(default 0.5 m):
+
+- The first lane is on **xmax** (`--first-lane xmin` to start on the other side).
+- Each lane starts on the **y edge nearer the takeoff spot**, so the first leg
+  goes straight across, not diagonally.
+- At the end it flies back to the takeoff spot and lands.
+
+```bash
+python simple_uwb_lawnmower.py --drone-id 2 --nose-deg -90 --xmin -0.5 --xmax 0.5 --ymin -3 --ymax 0 --confirm
+```
+
+With the nose along −y (so +x is the drone's left), that flies (0.5, 0) →
+(0.5, −3) → (0, −3) → (0, 0) → (−0.5, 0) → (−0.5, −3) → home: **left, forward,
+right, back, right, forward, home**. See `sweep_waypoints.png`.
+
+**Waypoint by waypoint:** each corner is sent to PX4 as **one waypoint** with
+the heading fixed (`CMD_WAYPOINT`), and PX4 flies there by itself. There's no
+planned path or timing. The next corner is only sent once UWB (averaged over
+1 s) puts the drone within 15 cm of this one (`--reach-tol`), followed by a 2 s
+hover (`--corner-hover`). The waypoint is resent every second while waiting, in
+case a packet is lost. If a corner isn't reached within 30 s
+(`--reach-timeout`), it logs it and carries on. The summary lists every corner
+as reached or missed, with its error. `simple_uwb_frame_goal.py` sends its goal
+the same way.
+
+**Set `MPC_XY_VEL_MAX` before flying.** With a bare waypoint, PX4 picks the
+speed itself: about `MPC_XY_P` × the distance to go, capped by `MPC_XY_VEL_MAX`.
+For a 3 m lane that's close to 3 m/s unless the cap is low. Set
+`MPC_XY_VEL_MAX` to around 0.3 m/s in QGroundControl for indoor tests.
+
+The heading stays fixed. Before anything connects, the script prints the corner
+list, the length and the time. On the ground it prints the sweep area in
+absolute UWB coordinates, so you can check it against the anchors before typing
+`SWEEP-2`. Once connected it prints the corners in UWB coordinates, and the log,
+summary and `--track sweep.csv` (UWB and PX4 positions) are in UWB coordinates too. Areas reaching more
+than 5 m from takeoff are refused (`--max-distance`).
 
 ## Settings
 
