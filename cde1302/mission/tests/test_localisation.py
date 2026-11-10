@@ -265,3 +265,86 @@ def test_detector_decodes_the_localisation_ids():
         for tag_id in (27, 28, 29):
             got = d.detect(render_view([FloorTag(tag_id, 0.0, 0.0)], (0.0, 0.0, 0.0)))
             assert [det.id for det in got] == [tag_id]
+
+
+# ---------------------------------------------------------------------------
+# Alignment to the home tag (localisation.align_to_home_tag)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("theta_deg", [-10.0, -3.5, 3.5, 10.0])
+def test_tag_yaw_sign_through_the_real_detector(theta_deg):
+    # A drone really turned +theta over a square tag, PX4 thinking it faces 0:
+    # the arena x axis is then at -theta in PX4's frame.
+    from apriltag_host import Detector
+    from localisation import quarter_mean, tag_yaw
+    from synth_camera import FloorTag, render_view
+    with Detector() as d:
+        im = render_view([FloorTag(29, 0.0, 0.0)], (0.0, 0.0, math.radians(theta_deg)), altitude=0.5)
+        det = next(x for x in d.detect(im) if x.id == 29)
+    a, _ = quarter_mean([tag_yaw(det.R, 90.0, 0.0)])
+    assert math.degrees(a) == pytest.approx(-theta_deg, abs=0.5)
+
+
+def test_quarter_mean_wraps_at_90_degrees():
+    from localisation import quarter_mean
+    m, spread = quarter_mean(np.radians([44.0, -44.0, 46.0, 134.0]))
+    assert abs(abs(math.degrees(m)) - 45.0) < 2.0 and math.degrees(spread) < 2.0
+
+
+def _arena_error(r):
+    """Largest distance between where the uploaded sweep really is (sim truth)
+    and the sweep as written in the arena frame."""
+    from mission import plan_waypoints
+    planned = plan_waypoints(r.m.settings)
+    real = [r.drone.real_from_estimate(x, y, 0.0)[:2] for x, y in r.m.waypoints]
+    return max(math.dist(a, b) for a, b in zip(real, planned))
+
+
+def test_alignment_squares_the_sweep_to_the_home_tag(tmp_path):
+    # PX4's frame turned 4 deg, as if the drone was put down crooked.
+    r = fly(tmp_path, sim={"drift_rot_deg": 4.0})
+    ev = r.events("ALIGNED")
+    assert ev and float(re.search(r"turned ([+-][\d.]+) deg", ev[0]["details"]).group(1)) \
+        == pytest.approx(4.0, abs=0.3)
+    assert _arena_error(r) < 0.02                     # really flies the arena lanes
+    assert {e.tag_id for e in r.m.tag_map.estimates(confirmed_only=True)} == \
+        {t.id for t in r.m.settings.sim.true_tags}
+
+
+def test_without_alignment_a_crooked_drone_sweeps_crooked(tmp_path):
+    r = fly(tmp_path, sim={"drift_rot_deg": 4.0}, localisation={"align_to_home_tag": False})
+    assert not r.events("ALIGNED")
+    assert _arena_error(r) > 0.25                     # 3.5 m x sin 4 deg
+
+
+def test_alignment_refuses_a_big_turn(tmp_path):
+    r = fly(tmp_path, sim={"drift_rot_deg": 20.0})
+    assert r.events("ALIGN_REFUSED") and not r.events("ALIGNED")
+
+
+def test_offline_tool_plots_and_corrects_the_route(tmp_path):
+    r = fly(tmp_path, sim=DRIFT)
+    run = r.m.log.folder
+    truth = " ".join(f"{t.id}:{t.x},{t.y}" for t in r.m.settings.sim.true_tags)
+    assert tool.main([str(run), "--truth", truth, "--plot", "--write"]) == 0
+    assert (run / "correction.png").stat().st_size > 20_000
+    with open(run / "trajectory_corrected.csv", newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    assert len(rows) > 100
+    # The corrected route ends back on the home tag's true spot (0, 0), within a few cm.
+    assert math.hypot(float(rows[-1]["x"]), float(rows[-1]["y"])) < 0.05
+    fit, tags = tool.relocalise(r.m.settings, tool.read_detections(run / "detections.csv"))
+    errs = tool.tag_errors(tags, tool.parse_truth(truth))
+    assert all(e["corr_err"] < e["raw_err"] for e in errs if e["raw_err"] and e["raw_err"] > 0.05)
+    assert tool.parse_truth("2:1.3,-1.35;4:2.76,0.92") == {2: (1.3, -1.35), 4: (2.76, 0.92)}
+
+
+def test_precision_landing_uses_the_tag_seen_on_the_way_home(tmp_path):
+    # Big sideways creep: back "home" the tag is out of the camera's view, but
+    # the return leg passed over it (flight 20261110_220437, 0.6 m to the left).
+    r = fly(tmp_path, sim={"drift_y_mps": 0.005})
+    ev = r.events("LAND_TARGET")
+    assert ev, "no correction: the return-leg sightings were ignored"
+    seen_cm = float(re.search(r"seen (\d+) cm", ev[0]["details"]).group(1))
+    assert seen_cm > 40                                # the tag really was far away
+    assert math.hypot(*real_position(r)) < 0.06        # but it landed on it

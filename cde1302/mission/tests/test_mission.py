@@ -435,7 +435,8 @@ def test_trajectory_sweep_keeps_the_heading_and_covers_the_area(tmp_path):
     assert max(abs(p.heading - h0) for p in r.drone.poses.snapshot()) < 1e-6
     # The camera looks straight down, so the plan stays where it is.
     assert not r.events("PLAN_SHIFTED")
-    assert m.waypoints[0][0] == pytest.approx(s.area.x_min + s.area.margin)
+    # (alignment moves the plan onto the home tag as seen: mm of sim noise)
+    assert m.waypoints[0][0] == pytest.approx(s.area.x_min + s.area.margin, abs=0.01)
     # One upload each for the sweep and the return, both played to the end.
     assert [e["details"].split(":")[0] for e in r.events("TRAJ_END")] == ["sweep", "return home"]
     assert all("done" in e["details"] for e in r.events("TRAJ_END"))
@@ -517,7 +518,7 @@ def test_camera_offset_moves_the_sweep_backwards(tmp_path):
     r.m.command("takeoff")
     assert r.until(lambda: r.m.phase == Phase.EXPLORING, 60)
     assert r.events("PLAN_SHIFTED")                        # drone faces North -> South
-    assert r.m.waypoints[0][0] == pytest.approx(s.area.x_min + s.area.margin - 0.6)
+    assert r.m.waypoints[0][0] == pytest.approx(s.area.x_min + s.area.margin - 0.6, abs=0.01)
     r.m.command("land")
     r.finish()
 

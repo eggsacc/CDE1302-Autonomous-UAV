@@ -19,7 +19,7 @@ area:
   margin: 0.0            # keep waypoints this far inside the edges (m)
 
 sweep:
-  lane_spacing: 2.5      # max distance between lanes (m); measure camera swath in the lab
+  lane_spacing: 0.8      # max distance between lanes (m); measure camera swath in the lab
   lanes_along: x         # "x" = lanes run North-South, "y" = lanes run East-West
   camera_offset_m: 0.0   # trajectory mode: drone -> middle of the camera's view on the floor (m).
                          # The heading never changes, so the whole sweep is shifted this far
@@ -44,7 +44,7 @@ network:
 flight:
   nav_mode: trajectory     # "trajectory": firmware plays the whole path, heading stays fixed
                            # "waypoints": one GOTO per waypoint, drone turns to face each one
-  cruise_speed_mps: 0.15   # trajectory speed; in waypoints mode only used for timeouts (m/s)
+  cruise_speed_mps: 0.36   # trajectory speed; in waypoints mode only used for timeouts (m/s)
   traj_dt_s: 0.20          # trajectory sample period; the firmware interpolates between samples.
                            # 0.20 = 2 cm spacing at 0.1 m/s and 6 upload packets for a full sweep (s)
   traj_max_speed_mps: 0.40 # refuse faster trajectories; firmware caps at 0.50 (m/s)
@@ -147,8 +147,8 @@ localisation:                  # known tags for drift correction + precision lan
   home_tag_id: 29              # centre of the start box: precision landing + start/end drift fix
   tags:
     - {id: 29, x: 0.0, y: 0.0}   # home tag (start box centre)
-    - {id: 27, x: 4.5, y: -1.35} # far end, under the y_min lane (the camera must pass over it)
-    - {id: 28, x: 4.5, y: 1.0}   # far end, under the y_max lane
+    - {id: 27, x: 4.6, y: -1.38} # far end, under the y_min lane (the camera must pass over it)
+    - {id: 28, x: 4.6, y: 0.92}   # far end, under the y_max lane
   # Drift correction, run when the tag report is made (after the return, before
   # landing).  Never sent to the drone: it only corrects the REPORTED tag positions.
   model: similarity            # similarity (turn + scale + shift) | rigid (turn + shift) | translation
@@ -163,9 +163,16 @@ localisation:                  # known tags for drift correction + precision lan
   # the tag as seen now (so drift since takeoff doesn't land it off the box).
   precision_landing: true
   takeoff_home_tag: true       # fly home to where the home tag was seen at takeoff, not the takeoff pose
+  # Alignment: before the sweep, turn (and shift) the whole plan so it is square
+  # to the home tag, i.e. to the tiles, however the drone was put down. PX4 has no
+  # compass: its x axis is wherever the nose pointed at power-up. Needs the home
+  # tag taped square to the tiles (any of its 4 sides forward).
+  align_to_home_tag: true
+  align_max_deg: 15.0          # a bigger turn is taken as a wrong reading and ignored (deg)
   land_window_s: 2.0           # use home-tag sightings from this long (s)...
   land_min_sightings: 5        # ...and at least this many of them (count)
-  land_max_offset_m: 0.6       # ignore a home-tag position this far from the takeoff spot (m)
+  land_max_offset_m: 1.0       # ignore a home-tag position this far from the takeoff spot (m);
+                               # flight 20261110_220437 needed 0.6
   land_max_corrections: 3      # move over the tag at most this many times before landing (count)
 
 logging:

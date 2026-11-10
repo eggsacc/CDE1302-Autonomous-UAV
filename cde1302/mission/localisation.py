@@ -48,6 +48,18 @@ Fit
 
 One global transform is a first-order correction: drift that keeps changing
 during the flight shows up as residuals in localisation.csv.
+
+Alignment (localisation.align_to_home_tag)
+------------------------------------------
+PX4 has no compass, so its x axis is wherever the nose pointed at power-up;
+a drone put down 3 deg off square sweeps 0.25 m off at the far end of a 5 m
+lane.  Each sighting also gives the tag's orientation (Sighting.cam_R).  With
+the tag taped square to the tiles, its axes ARE the arena axes (up to a
+multiple of 90 deg), so during the hover alignment() measures where the arena
+x axis points in PX4's frame, and mission.py turns the sweep by that much
+before uploading it.  Checked both ways: a synthetic image of a drone turned
++theta (PX4 thinking 0) gives -theta through the real detector, and a real
+flight put down ~3.5 deg clockwise (it drifted right) gives -3.6 deg.
 """
 
 from __future__ import annotations
@@ -59,6 +71,7 @@ from typing import Iterable, Optional, Sequence
 
 import numpy as np
 
+from camera_mount import r_body_cam
 from settings import LOC_MODELS, Localisation, Settings
 from tag_map import robust_estimate
 
@@ -72,6 +85,27 @@ class LocSighting:
     t: float                  # capture time (mission clock, s)
     x: float
     y: float
+    yaw: Optional[float] = None   # direction of the tag's x axis in PX4's frame (rad)
+
+
+def tag_yaw(cam_R, pitch_deg: float, heading: float) -> float:
+    """Direction of a tag's x axis in PX4's frame (rad, clockwise +).
+
+    cam_R: the tag's rotation in the camera frame (Detection.R, 9 row-major);
+    pitch_deg: tags.camera_pitch_deg; heading: drone yaw at capture (rad).
+    """
+    rb = r_body_cam(pitch_deg) @ np.asarray(cam_R, dtype=float).reshape(3, 3)
+    a = math.atan2(rb[1, 0], rb[0, 0]) + heading
+    return (a + math.pi) % (2 * math.pi) - math.pi
+
+
+def quarter_mean(angles) -> tuple[float, float]:
+    """Mean of angles modulo 90 deg (a square tag looks the same turned by 90),
+    in [-45, 45) deg, and the spread (rad).  Returns (mean, rms deviation)."""
+    a = np.asarray(angles, dtype=float)
+    m = float(np.angle(np.mean(np.exp(4j * a)))) / 4.0
+    dev = (a - m + math.pi / 4) % (math.pi / 2) - math.pi / 4
+    return m, float(np.sqrt(np.mean(dev ** 2)))
 
 
 @dataclass(frozen=True)
@@ -307,6 +341,7 @@ class LocTags:
 
     def __init__(self, settings: Settings) -> None:
         self.cfg = settings.localisation
+        self.pitch_deg = settings.tags.camera_pitch_deg
         self.confirm_radius_m = settings.tags.confirm_radius_m
         self.outlier_radius_m = settings.tags.outlier_radius_m
         self._rows: list[LocSighting] = []
@@ -321,9 +356,25 @@ class LocTags:
         return tag_id in self.cfg.ids
 
     def add(self, s) -> None:
-        """Store a Sighting (or anything with tag_id, t_capture, x, y)."""
+        """Store a Sighting (or anything with tag_id, t_capture, x, y, and
+        optionally cam_R + drone.heading for the tag's orientation)."""
+        cam_R = getattr(s, "cam_R", None)
+        drone = getattr(s, "drone", None)
+        yaw = (tag_yaw(cam_R, self.pitch_deg, drone.heading)
+               if cam_R is not None and drone is not None else None)
         with self._lock:
-            self._rows.append(LocSighting(s.tag_id, s.t_capture, s.x, s.y))
+            self._rows.append(LocSighting(s.tag_id, s.t_capture, s.x, s.y, yaw))
+
+    def alignment(self, tag_id: int, since_t: float,
+                  min_n: int) -> Optional[tuple[float, int, float]]:
+        """Where the arena x axis points in PX4's frame, from the tag's
+        orientation in sightings captured after since_t: (rad in [-pi/4, pi/4),
+        sightings used, rms spread rad), or None with fewer than min_n."""
+        yaws = [s.yaw for s in self.sightings(tag_id) if s.t >= since_t and s.yaw is not None]
+        if len(yaws) < min_n:
+            return None
+        m, spread = quarter_mean(yaws)
+        return m, len(yaws), spread
 
     def sightings(self, tag_id: Optional[int] = None) -> list[LocSighting]:
         with self._lock:

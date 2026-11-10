@@ -46,7 +46,9 @@ first waypoint is home (the takeoff spot); the area's size and shape stay.
 sweep.start_in_middle centres the lanes across home instead.
 
 With localisation.enabled, sightings of the localisation tags (known spots on
-the floor, localisation.py) are kept out of the tag map.  The home tag sets
+the floor, localisation.py) are kept out of the tag map.  With
+localisation.align_to_home_tag the plan is first turned and shifted to be
+square to the home tag (so to the tiles), however the drone was put down.  The home tag sets
 the landing spot (seen at takeoff, then again over home: precision landing,
 the drone is moved over it before CMD_LAND).  At the tag report all of them
 fit a PX4 -> arena transform that corrects the reported tag positions
@@ -202,6 +204,7 @@ class Mission:
         self._correcting = False                 # precision landing: a move is playing
         self._land_corrections = 0
         self._land_tag_ignored = False
+        self._land_since = 0.0                   # precision landing: sightings from here on
         self.drone = drone
         self.source = source
         self.tag_map = tag_map
@@ -453,6 +456,7 @@ class Mission:
             self.wp_index = 0
             self._set_phase(Phase.EXPLORING, "auto" if self.auto else "operator start")
             self._home_tag_at_takeoff()
+            self._align_plan_to_home_tag()
             p = self.drone.latest_pose()
             if self.use_trajectory:
                 self._shift_plan_for_camera(p.heading)
@@ -488,6 +492,45 @@ class Mission:
         self.land_target = (x, y)
         self.log.event("HOME_TAG", f"tag {lo.home_tag_id} at ({x:.3f}, {y:.3f}) from {n} "
                        f"sightings, {off * 100:.0f} cm from the takeoff pose: landing spot")
+
+    def _align_plan_to_home_tag(self) -> None:
+        """localisation.align_to_home_tag: the plan is written in the arena frame
+        (origin = home tag, x along the tiles).  PX4's frame starts wherever the
+        drone was put down, so turn the plan by where the home tag's axes point
+        in PX4's frame and move it onto the tag, before anything is uploaded."""
+        lo = self.settings.localisation
+        if not (lo.enabled and lo.align_to_home_tag) or self.home is None:
+            return
+        tag = lo.home_tag_id
+        pos = self.loc.recent_estimate(tag, self._takeoff_t, math.inf, lo.min_visit_sightings)
+        rot = self.loc.alignment(tag, self._takeoff_t, lo.min_visit_sightings)
+        if pos is None or rot is None:
+            self.log.event("ALIGN_SKIPPED", f"home tag {tag} not seen {lo.min_visit_sightings}x "
+                           f"with its orientation during takeoff; plan left as written")
+            return
+        (px, py, _), (theta, n, spread) = pos, rot
+        if abs(math.degrees(theta)) > lo.align_max_deg:
+            self.log.event("ALIGN_REFUSED", f"home tag {tag} turned {math.degrees(theta):+.1f} deg "
+                           f"> align_max_deg {lo.align_max_deg}; plan left as written")
+            return
+        if math.dist((px, py), self.home) > lo.land_max_offset_m:
+            self.log.event("ALIGN_REFUSED", f"home tag {tag} at ({px:.3f}, {py:.3f}) is more than "
+                           f"land_max_offset_m from the takeoff pose; plan left as written")
+            return
+        c, s = math.cos(theta), math.sin(theta)
+
+        def to_px4(x: float, y: float) -> tuple[float, float]:
+            return round(px + c * x - s * y, 3), round(py + s * x + c * y, 3)
+
+        self.waypoints = [to_px4(x, y) for x, y in self.waypoints]
+        a = self.area
+        xs, ys = zip(*(to_px4(x, y) for x in (a.x_min, a.x_max) for y in (a.y_min, a.y_max)))
+        self.area = dataclasses.replace(a, x_min=min(xs), x_max=max(xs),
+                                        y_min=min(ys), y_max=max(ys))
+        self.state.set(waypoints=tuple(self.waypoints), area=self.area)
+        self.log.event("ALIGNED", f"plan turned {math.degrees(theta):+.2f} deg and moved onto home "
+                       f"tag {tag} at ({px:.3f}, {py:.3f}): {n} sightings, spread "
+                       f"{math.degrees(spread):.1f} deg")
 
     def _shift_plan_for_camera(self, heading: float) -> None:
         """Trajectory mode: the heading is now fixed, so move the sweep back so
@@ -639,6 +682,9 @@ class Mission:
 
     def _begin_return(self, now: float, reason: str) -> None:
         self._set_phase(Phase.RETURNING, reason)
+        # The way home usually passes over the home tag: with drift it may be out
+        # of view once "home", so its sightings from here on count for landing.
+        self._land_since = self.drone.now()
         target = self.land_target or self.home
         if not self.use_trajectory:
             self.leg = self._new_leg("return home", target, now)
@@ -713,18 +759,21 @@ class Mission:
             self.leg = None
         self._correcting = False
         self._settle_t = now
+        self._land_since = now                  # judge the move by fresh sightings
         self._recent.clear()
         return True
 
     def _precision_land(self, now: float) -> bool:
-        """localisation.precision_landing: if the home tag, seen since the drone
-        settled, is not under the landing spot, move the spot onto it and fly
-        there.  True when a correction move was started."""
+        """localisation.precision_landing: if the home tag, as last seen since the
+        return began (or since the previous correction), is not under the
+        landing spot, move the spot onto it and fly there.  The newest
+        land_window_s of sightings count, so a tag passed on the way home, then
+        out of view, still works.  True when a correction move was started."""
         lo = self.settings.localisation
         if (not (lo.enabled and lo.precision_landing) or self.home is None
                 or self._land_corrections >= lo.land_max_corrections):
             return False
-        est = self.loc.recent_estimate(lo.home_tag_id, self._settle_t, lo.land_window_s,
+        est = self.loc.recent_estimate(lo.home_tag_id, self._land_since, lo.land_window_s,
                                        lo.land_min_sightings)
         if est is None:
             return False

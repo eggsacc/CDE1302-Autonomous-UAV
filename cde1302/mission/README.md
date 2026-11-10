@@ -170,15 +170,28 @@ full tag16h5 family (the course sheet only goes up to 21).
   folder gets `tags_corrected.csv` and `localisation.csv` (each visit and its
   residual). `tags_final.csv` stays in the raw PX4 frame.
 
-This never goes to PX4: the drone flies the same way, apart from the small
-move over the home tag before landing. Turn off with `localisation.enabled: false`.
+None of this goes to PX4 as position: the drone only flies differently by the
+alignment of the plan before the sweep and the small move over the home tag
+before landing. Turn off with `localisation.enabled: false`.
 
-If the tag positions were measured wrong, fix `config.yaml` and redo the
-correction from the log:
+- **Alignment, before the sweep** (`align_to_home_tag`): PX4 has no compass,
+  so its x axis is wherever the nose pointed at power-up, and 3° off square is
+  about 25 cm off at the far end. While hovering, the drone measures how tag 29
+  is turned in the camera image and turns (and shifts) the whole sweep to match
+  (`ALIGNED` event). Tag 29 must be taped square to the tiles; any side can face
+  forward. Turns over `align_max_deg` (15°) are ignored as wrong readings.
+
+**Before/after analysis** (after a flight, from the log): recorded vs corrected
+route and tags on one map, plus the error against the true tag positions:
 
 ```bash
-python mission/tools/relocalise.py mission/logs/<run> --config mission/config.yaml --write
+python mission/tools/relocalise.py mission/logs/<run> --truth "2:1.3,-1.35 4:2.76,0.92" --plot
 ```
+
+It saves `correction.png` in the run folder. `--write` also saves
+`trajectory_corrected.csv` (the route in the arena frame), and rewrites
+`tags_corrected.csv` and `localisation.csv`. If the tag positions were measured
+wrong, fix `config.yaml` and add `--config mission/config.yaml`.
 
 Try it in the simulator by setting `sim.drift_scale`, `drift_rot_deg`,
 `drift_x_mps` and `drift_y_mps` (for example 0.05, 3, 0.0004, -0.0004).

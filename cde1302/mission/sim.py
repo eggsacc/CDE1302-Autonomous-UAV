@@ -62,7 +62,7 @@ import numpy as np
 
 import laptop_path  # noqa: F401
 from apriltag_host import Detection
-from camera_mount import body_to_camera
+from camera_mount import body_to_camera, r_body_cam
 from protocol import (NAV_ARRIVED, NAV_FLYING, NAV_IDLE, NAV_ROTATING, NAV_TRAJ,
                       TRAJ_CHUNK_PTS)
 
@@ -532,12 +532,22 @@ class SimTagSource:
                 log.exception("on_sighting callback failed")
         return len(due)
 
-    def _detection(self, tag_id: int, body: tuple[float, float, float]) -> Detection:
-        t = body_to_camera(body, self.settings.tags.camera_pitch_deg,
-                           self.settings.tags.camera_pos_m)
+    def _detection(self, tag_id: int, body: tuple[float, float, float],
+                   true_heading: float = 0.0) -> Detection:
+        """A detection of a tag lying square on the floor (its axes along the
+        real world's), seen from a drone really facing true_heading."""
+        pitch = self.settings.tags.camera_pitch_deg
+        t = body_to_camera(body, pitch, self.settings.tags.camera_pos_m)
+        # In the body frame a square tag's x axis is at 90 deg - true_heading
+        # (90: the detector's tag x axis is the image's, i.e. body right).
+        a = math.pi / 2 - true_heading
+        rz = np.array([[math.cos(a), -math.sin(a), 0.0],
+                       [math.sin(a), math.cos(a), 0.0],
+                       [0.0, 0.0, 1.0]])
+        R = r_body_cam(pitch).T @ rz
         return Detection(id=tag_id, hamming=0, decision_margin=200.0,
                          centre=(160.0, 120.0), corners=((0.0, 0.0),) * 4,
-                         pose_valid=True, t=t, R=tuple(np.eye(3).ravel()),
+                         pose_valid=True, t=t, R=tuple(R.ravel()),
                          pose_err=1e-3)
 
     def _capture(self, tc: float) -> None:
@@ -568,7 +578,7 @@ class SimTagSource:
         for tag_id, f, r, north, east in seen:
             body = (f + self._rng.gauss(0, n), r + self._rng.gauss(0, n),
                     alt + self._rng.gauss(0, n))
-            s, reason = self._filter.evaluate(self._detection(tag_id, body), tc,
+            s, reason = self._filter.evaluate(self._detection(tag_id, body, heading), tc,
                                               t_detect, self._drone)
             with self._lock:
                 self._stats.detections += 1

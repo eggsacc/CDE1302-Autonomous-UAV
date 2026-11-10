@@ -187,9 +187,11 @@ class Localisation:
     max_scale_error: float = 0.25
     precision_landing: bool = True
     takeoff_home_tag: bool = True
+    align_to_home_tag: bool = True
+    align_max_deg: float = 15.0
     land_window_s: float = 2.0
     land_min_sightings: int = 5
-    land_max_offset_m: float = 0.6
+    land_max_offset_m: float = 1.0
     land_max_corrections: int = 3
 
     @property
@@ -462,13 +464,15 @@ def validate(s: Settings) -> None:
               "land_window_s", "land_min_sightings", "land_max_offset_m")
     _non_negative(lo, "localisation", "min_span_m", "max_rotation_deg", "max_scale_error",
                   "land_max_corrections")
+    _check(0.0 < lo.align_max_deg < 45.0,
+           f"localisation.align_max_deg must be between 0 and 45 (got {lo.align_max_deg})")
     _check(lo.max_scale_error < 1.0,
            f"localisation.max_scale_error must be < 1 (got {lo.max_scale_error})")
     if lo.enabled:
         _check(bool(lo.tags), "localisation.enabled needs at least one entry in localisation.tags")
         clash = sorted(set(loc_ids) & set(ids))
         _check(not clash, f"sim.true_tags uses localisation tag id(s) {clash}")
-        if lo.precision_landing or lo.takeoff_home_tag:
+        if lo.precision_landing or lo.takeoff_home_tag or lo.align_to_home_tag:
             _check(lo.home_tag_id in loc_ids,
                    f"localisation.home_tag_id {lo.home_tag_id} is not in localisation.tags")
 
