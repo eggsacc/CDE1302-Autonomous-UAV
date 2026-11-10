@@ -143,7 +143,30 @@ menu "Drone Configuration"
           speeds up and slows down by itself; the top speed is MPC_XY_VEL_MAX.
           Heading stays fixed at the takeoff heading. The lookahead below is not
           used in this mode.
-          Off = the target slides along the path TRAJ_LOOKAHEAD_CM ahead.
+          Off = follow mode (TRAJ_FEEDFORWARD) or the TRAJ_LOOKAHEAD_CM carrot.
+
+    config TRAJ_FEEDFORWARD
+        bool "Trajectory: steady speed with velocity feedforward (follow mode)"
+        depends on !TRAJ_WAYPOINTS
+        default y
+        help
+          The target sits just ahead of the drone's progress along the path,
+          and PX4 also gets the planned velocity as feedforward. The speed is
+          then flight.cruise_speed_mps from mission/config.yaml (not gain x
+          lookahead), ramped at TRAJ_ACCEL_CMS2 after each corner and down to
+          5 cm/s by TRAJ_CORNER_CM before the next. The position error is only
+          the sideways correction, so the drone holds the lane line without
+          the surge-and-brake of the plain carrot. TRAJ_LOOKAHEAD_CM is not
+          used. Off = the TRAJ_LOOKAHEAD_CM carrot.
+
+    config TRAJ_ACCEL_CMS2
+        int "Trajectory: speed-up / slow-down rate (cm/s^2)"
+        depends on TRAJ_FEEDFORWARD
+        range 5 200
+        default 30
+        help
+          How fast follow mode changes speed at lane starts and corners.
+          30 cm/s^2 takes 0.8 s and 10 cm to reach 0.25 m/s.
 
     config TRAJ_LOOKAHEAD_CM
         int "Trajectory: target distance ahead of the drone (cm)"
@@ -163,8 +186,10 @@ menu "Drone Configuration"
         default 15
         help
           At each lane end and at the last point the target stops until the
-          drone is this close (in waypoint mode: the waypoint radius, min 5 cm). Keep below the lookahead, or the drone will not
-          slow down for corners. 0 = no stop at corners.
+          drone is this close (in waypoint mode: the waypoint radius, min 5 cm).
+          Carrot: keep below the lookahead, or the drone will not slow down for
+          corners; 0 = no stop at corners. Follow mode: about 5 cm (min 3 cm);
+          the speed is already down to 5 cm/s here, so it turns cleanly.
 
     config CAMERA_STREAM_DEFAULT_FPS
         int "Camera preview default frame rate"

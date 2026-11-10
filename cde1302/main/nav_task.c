@@ -52,6 +52,13 @@ static float      s_traj_yaw;
 #else
 #define TRAJ_WAYPOINTS 0
 #endif
+#ifdef CONFIG_TRAJ_FEEDFORWARD
+#define TRAJ_FOLLOW 1
+#define TRAJ_ACCEL_MPS2 (CONFIG_TRAJ_ACCEL_CMS2 / 100.0f)
+#else
+#define TRAJ_FOLLOW 0
+#define TRAJ_ACCEL_MPS2 0.0f
+#endif
 static traj_gate_t s_traj_gate;    /* where along the path the target is          */
 static int64_t    s_traj_tick_us;  /* esp_timer time of the previous traj_tick()  */
 
@@ -254,7 +261,11 @@ static int traj_next_corner(int from)
  * no velocity, like a GOTO, so the speed comes from the steady gap.  With the
  * lookahead at 0 it plays on the clock, with velocity feedforward.  With
  * CONFIG_TRAJ_WAYPOINTS the target is the next lane end itself, so PX4 flies
- * each lane in one go.  Heading stays at the takeoff heading (s_traj_yaw).
+ * each lane in one go.  With CONFIG_TRAJ_FEEDFORWARD (follow mode) the target
+ * sits just ahead of the drone's progress along the path and PX4 also gets the
+ * gate's speed profile as velocity feedforward, so the speed is the planned
+ * one, ramped at each corner, and the position error is the sideways
+ * correction.  Heading stays at the takeoff heading (s_traj_yaw).
  * --------------------------------------------------------------------------- */
 static void traj_point(float k, float *x, float *y, void *ctx)
 {
@@ -304,7 +315,21 @@ static void traj_tick(void)
         return;
     }
 
-    if (TRAJ_WAYPOINTS || CONFIG_TRAJ_LOOKAHEAD_CM > 0) {
+    if (s_traj_gate.follow) {
+        /* Feedforward along the path where the drone is (its progress), at the
+         * gate's ramped speed.  Skip zero-length segments (a repeated end point). */
+        int j = (int)s_traj_gate.proj;
+        if (j > last - 1) j = last - 1;
+        float dx = 0.0f, dy = 0.0f, d = 0.0f;
+        for (; j >= 0; j--) {
+            dx = s_traj[j + 1].x - s_traj[j].x;
+            dy = s_traj[j + 1].y - s_traj[j].y;
+            d  = sqrtf(dx * dx + dy * dy);
+            if (d > 1e-6f) break;
+        }
+        float v  = d > 1e-6f ? s_traj_gate.speed / d : 0.0f;
+        mavlink_set_position_velocity_ned(sp_x, sp_y, sp_z, dx * v, dy * v, 0.0f, s_traj_yaw);
+    } else if (TRAJ_WAYPOINTS || CONFIG_TRAJ_LOOKAHEAD_CM > 0) {
         mavlink_set_position_ned(sp_x, sp_y, sp_z, s_traj_yaw);
     } else {
         float hz = 1000.0f / (float)s_traj_dt_ms;
@@ -516,6 +541,9 @@ void nav_traj_start(uint8_t id, uint16_t dt_ms)
         s_traj_dt_ms  = dt_ms;
 #if TRAJ_WAYPOINTS
         traj_gate_start_waypoints(&s_traj_gate, s_traj_n, CONFIG_TRAJ_CORNER_CM / 100.0f);
+#elif TRAJ_FOLLOW
+        traj_gate_start_follow(&s_traj_gate, s_traj_n, dt_ms / 1000.0f,
+                               CONFIG_TRAJ_CORNER_CM / 100.0f, TRAJ_ACCEL_MPS2);
 #else
         traj_gate_start(&s_traj_gate, s_traj_n, dt_ms / 1000.0f,
                         CONFIG_TRAJ_LOOKAHEAD_CM / 100.0f,

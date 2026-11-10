@@ -14,7 +14,7 @@ import pytest
 from test_nlink_c import CDE, _compiler
 
 SOURCES = [CDE / "main" / "traj_gate.c", Path(__file__).parent / "host_c" / "traj_gate_host_main.c"]
-Run = namedtuple("Run", "done_s k x y end_err corner_err speed speed_std max_gap")
+Run = namedtuple("Run", "done_s k x y end_err corner_err speed speed_std max_gap max_xtrack")
 GAIN = 0.95                          # PX4 default MPC_XY_P
 
 
@@ -35,10 +35,9 @@ def host(tmp_path_factory):
 
 
 def fly(exe, lookahead=0.25, corner=0.15, max_speed=0.5, noise=0.0, seconds=60.0,
-        leg=2.0, leg2=0.0, freeze=None):
-    args = [lookahead, corner, GAIN, max_speed, noise, seconds, leg, leg2]
-    if freeze is not None:
-        args.append(freeze)
+        leg=2.0, leg2=0.0, freeze=None, accel=0.0, push=0.0):
+    args = [lookahead, corner, GAIN, max_speed, noise, seconds, leg, leg2,
+            -1.0 if freeze is None else freeze, accel, push]
     out = subprocess.run([str(exe), *map(str, args)], capture_output=True, text=True,
                          check=True).stdout.split()
     return Run(*map(float, out))
@@ -114,3 +113,52 @@ def test_waypoints_reach_each_corner(host):
 def test_waypoints_wait_for_a_drone_that_cannot_move(host):
     r = fly(host, lookahead=-1, max_speed=0.0, seconds=30)
     assert r.done_s < 0 and r.x == 0.0
+
+
+# Follow mode (accel > 0 in the driver): progress + velocity feedforward.
+# The driver's path is planned at 0.1 m/s (0.02 m every 0.2 s).
+
+def follow(exe, **kw):
+    kw.setdefault("accel", 0.3)
+    kw.setdefault("corner", 0.05)
+    kw.setdefault("max_speed", 0.4)
+    return fly(exe, **kw)
+
+
+def test_follow_flies_at_the_planned_speed(host):
+    r = follow(host, leg=2.0, seconds=40)
+    assert r.done_s > 0 and r.end_err <= 0.05 + 0.01
+    # The speed is the plan (+ the small lead x gain), not gain x lookahead.
+    assert r.speed == pytest.approx(0.1, rel=0.15) and r.speed_std < 0.005
+
+
+def test_follow_speed_stays_steady_with_position_noise(host):
+    r = follow(host, noise=0.05)
+    assert r.speed == pytest.approx(0.1, rel=0.25) and r.speed_std < 0.01
+
+
+def test_follow_holds_the_line_against_a_sideways_push(host):
+    # A 3 cm/s sideways push (flow bias): steady state is push / gain off the line.
+    ff = follow(host, leg=4.0, seconds=80, push=0.03)
+    way = fly(host, lookahead=-1, corner=0.15, max_speed=0.4, leg=4.0, seconds=40, push=0.03)
+    assert ff.max_xtrack < 0.05
+    assert way.max_xtrack > 2 * ff.max_xtrack           # waypoint mode drifts off
+
+
+def test_follow_slows_into_a_corner_and_reaches_it(host):
+    r = follow(host, leg=1.0, leg2=0.5, seconds=40)
+    assert r.done_s > 0
+    assert 0 <= r.corner_err <= 0.05 + 0.02
+    assert r.x == pytest.approx(1.0, abs=0.06) and r.y == pytest.approx(0.5, abs=0.06)
+
+
+def test_follow_waits_for_a_drone_that_cannot_move(host):
+    r = follow(host, max_speed=0.0, seconds=30)
+    assert r.done_s < 0 and r.x == 0.0
+    assert r.k * 0.02 < 0.05                             # target stays at the start
+
+
+def test_follow_stale_position_stops_the_feedforward(host):
+    healthy = follow(host, seconds=20)
+    frozen = follow(host, seconds=20, freeze=2.0)
+    assert frozen.done_s < 0 and frozen.x < healthy.x / 3
