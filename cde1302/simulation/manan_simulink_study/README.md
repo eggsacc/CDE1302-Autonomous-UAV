@@ -1,10 +1,11 @@
 # Manan's lecturer-based Simulink UAV study
 
-> **Stopped for handoff at Manan's request, 11 November 2026.** Start with
-> [CLAUDE_HANDOFF.md](CLAUDE_HANDOFF.md), designed to be pasted below his original
-> project brief. The original reproduction and raw position-step mission ran.
-> The approved bounded-reference governor now passes pure logic checks but has
-> **not** been run through the vehicle model. Phase 1 is not complete.
+> **Status, 11 November 2026:** Phase 1 baseline executed. The lecturer's
+> original circle, the raw position-step mission and the approved
+> bounded-reference governor mission have all run through the vehicle model in
+> MATLAB R2026a. Current checkpoint and numbers: [PROGRESS.md](PROGRESS.md).
+> History of the Codex session: [CLAUDE_HANDOFF.md](CLAUDE_HANDOFF.md).
+> Branch: `manan`. Phase 2 has not started.
 
 Phase 1 builds a fixed-yaw, position-command testbench around Dr Feng LIN's
 original quadrotor model. It separates command, simulated truth and ideal
@@ -23,26 +24,34 @@ check_mission_reference;
 result = run_phase1('demo');
 ```
 
-To rerun only the mission: `result = run_baseline('demo');`.
+To rerun only the mission: `result = run_baseline('demo');` (about four
+minutes of wall time for the 256 s mission at 1 ms fixed step).
 `run_baseline('team_head_placeholder')` instead uses the pinned team's
-configured sweep rectangle and lane spacing. `study_config('assessment')`
-deliberately refuses to run until the missing authoritative geometry is
-provided. No drone, serial port, MAVLink connection or firmware tool is used.
+configured sweep rectangle and lane spacing; that preset has not yet been run
+through the plant. `study_config('assessment')` deliberately refuses to run
+until the missing authoritative geometry is provided. No drone, serial port,
+MAVLink connection or firmware tool is used.
 
-The MATLAB desktop entry point above is the validated route. An ordinary
-PowerShell batch command is also provided below, but a full batch simulation
-has not completed through this Codex environment:
+To look at an existing run without simulating again:
 
-```powershell
-& 'C:\Program Files\MATLAB\R2026a\bin\matlab.exe' -batch "run_phase1('demo');"
+```matlab
+result = postprocess_baseline('demo');   % rebuild metrics/plots/run.mat from raw_simulation.mat
+animate_run('demo');                     % replay the saved run, 10x real time
+animate_run('demo', 30);                 % faster replay; close the figure to stop
 ```
 
-The installed R2026a Update 5 has executed the lecturer model. Codex's restricted
-terminal launch failed before MATLAB code ran; reviewed batch execution passed
-version/licence/logic checks but stalled during Simulink runtime initialization.
-Desktop execution produced saved original-model data and figures. Git metadata
-also required reviewed execution. These observations do not establish that
-ordinary PowerShell outside Codex has the same problem.
+`animate_run` is a replay of logged data, not a live simulation. To watch
+Simulink compute, open `generated/MananStudy_RPT.slx` after a build and press Run.
+
+**Batch mode:** `run_baseline` runs to completion from ordinary PowerShell with
+`matlab -batch` on this machine (simulation, raw save, metrics and CSV). The PNG
+export, however, hangs in batch mode with these sample counts, so use
+`postprocess_baseline` in the desktop for plots. Codex's earlier batch failures
+were specific to its sandbox.
+
+```powershell
+& 'C:\Program Files\MATLAB\R2026a\bin\matlab.exe' -batch "cd('<study dir>'); addpath(pwd); run_baseline('demo');"
+```
 
 Required: MATLAB, Simulink, Aerospace Toolbox and Aerospace Blockset. The model
 also calls rotation-conversion functions; `check_environment` records their
@@ -75,7 +84,9 @@ That raw mode was executed and found overly aggressive for this model. Manan
 approved the new default `bounded_position` reference governor: a 0.15 m/s
 horizontal/vertical sampled-command bound, same corner sequence and no v/a
 feedforward. It additionally waits for the command to reach each corner.
-Its latest pure logic checks pass, but plant execution remains pending.
+It has now executed through the plant and completed the mission; the command
+slew measured at the native 20 Hz ticks never exceeded 0.150 m/s. Results are
+tabulated in `PROGRESS.md`.
 Intended corners omit upload sampling/quantisation. Takeoff, home settle and
 a 0.10 m/s reference descent are explicit simulation stages, not PX4 landed
 detection/disarm. Completion/failure stops the run; the current 360 s cap is
@@ -123,8 +134,11 @@ measurement exists in this baseline.
 
 `results/original_circle/` contains the reproduced original logs and plots.
 The preserved raw run is `results/fixed_yaw_demo/`. New runs use
-`results/fixed_yaw_<preset>_<guidanceMode>/` and contain `run.mat`, `trajectory.csv`,
-`metrics.json`, `checks.json`, `sample_times.txt` and three PNG plots.
+`results/fixed_yaw_<preset>_<guidanceMode>/` and contain `raw_simulation.mat`
+(the untouched Simulink output), `run.mat`, `trajectory.csv`, `metrics.json`,
+`checks.json`, `sample_times.txt` and three PNG plots. The governor baseline is
+`results/fixed_yaw_demo_bounded_position/`. Evidence JSON records the
+simulation time and the post-processing time separately.
 `evidence/` contains compact dependency, logic and execution summaries.
 Generated/runtime results are ignored by Git; review size and provenance
 before versioning any data. No raw flight logs are imported or fabricated.
@@ -177,10 +191,12 @@ The source/docs do not establish which binary/configuration actually flew.
 their firmware. Existing landmark correction is post-flight, not EKF feedback.
 
 Manan's contribution is experiment definition, adaptation, reproducible
-measurements, validation and interpretation. Codex assisted with audit and
-study-code implementation; this README does not claim independent authorship
-of lecturer, teammate or Codex-generated code.
+measurements, validation and interpretation. Codex assisted with audit and the
+initial study-code implementation; Claude Code continued with governor
+execution, post-processing, replay and documentation. This README does not
+claim independent authorship of lecturer, teammate or AI-generated code.
 
 Phase 2 (targets, anchors, estimator and GUI), Phase 3 (paired yaw experiments)
-and optional UWB have not been implemented. Pause for Manan's review after
-Phase 1 evidence. No commit or push is authorised yet.
+and optional UWB have not been implemented. Phase 1 is awaiting Manan's review.
+Manan pushed the study to branch `manan`; the AI assistants do not commit or
+push without his explicit approval.

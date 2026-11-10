@@ -1,5 +1,10 @@
 # CONTINUATION HANDOFF FOR CLAUDE — append below Manan's original README
 
+> **Superseded for current status (11 Nov 2026, later the same day):** the
+> governor run described as pending below has since executed and completed,
+> and the study now lives on branch `manan`. See `PROGRESS.md` for the live
+> checkpoint. This file is kept unchanged below as history.
+
 **Read Manan's original project brief above this section in full. It remains the authoritative specification. Follow its phases, engineering explanations, validation standards, safety restrictions and approval gates exactly. This handoff adds implementation history and current state; it does not replace or relax any requirement.**
 
 Manan asked Codex to stop engineering work and prepare this handoff on **11 November 2026, Singapore time**. Do not interpret the existence of source files as evidence that every feature has run. Resume from the specific checkpoint below, without repeating the entire initial audit or claiming Phase 1 is complete.
