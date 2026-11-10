@@ -217,16 +217,20 @@ def _compiler() -> str:
 
 # -ffp-contract=off keeps the host from fusing multiply-adds, so margins and
 # poses stay comparable with the drone's.
+# -DNDEBUG silences the library's debug_print(): e.g. apriltag_pose.c's
+# "fix_pose_ambiguities(): Error, more than one new minimum found", printed for
+# every head-on tag (camera straight down) while the main pose is kept anyway.
+# It only turns off debug prints and assert(); no result changes.
 if sys.platform == "win32":
     # The AprilTag sources use Win32 threads here (common/pthreads_cross), so
     # no -lpthread.  -static-libgcc is a guard: today's code needs nothing
     # from libgcc_s_seh-1.dll, but if it ever does (popcount, int128, TLS),
     # python.org's Python would not find that DLL, as Python 3.8+ no longer
     # searches PATH for a DLL's dependencies.
-    _CFLAGS = ["-O2", "-ffp-contract=off", "-shared", "-w"]
+    _CFLAGS = ["-O2", "-ffp-contract=off", "-shared", "-w", "-DNDEBUG"]
     _LDFLAGS = ["-static-libgcc", "-lm"]
 else:
-    _CFLAGS = ["-O2", "-ffp-contract=off", "-shared", "-fPIC", "-w"]
+    _CFLAGS = ["-O2", "-ffp-contract=off", "-shared", "-fPIC", "-w", "-DNDEBUG"]
     _LDFLAGS = ["-lm", "-lpthread"]
 
 
