@@ -18,7 +18,7 @@ area:
   x_max: 4.6             # m: node row 10
   y_min: -1.84           # m: node column -4
   y_max: 1.38            # m: node column 3
-  margin: 0.2           # keep waypoints this far inside the edges (m)
+  margin: 0.3           # keep waypoints this far inside the edges (m)
 
 sweep:
   lane_spacing: 1.0      # max distance between lanes (m); measure camera swath in the lab
@@ -93,9 +93,12 @@ camera:
   use_frame_pose: true         # place tags with the pose the drone paired with each frame
                                # (no Wi-Fi delay); false = laptop timing + latency bias
   max_frame_pose_gap_ms: 100   # ignore a frame pose this far from a PX4 sample (ms)
+  fx: 0.0                      # lens focal lengths (px) for the tag pose; 0 = the course's
+  fy: 0.0                      # (163.5 / 153.2). Measure with tools/cam_bench.py
 
 tags:
-  tag_size_m: 0.12             # edge of the BLACK square, not the paper (m); course tags are 120 mm
+  tag_size_m: 0.112            # SEARCH tags: edge of the BLACK square, not the paper (m); course
+                               # tags are 120 mm. Localisation tags: localisation.tag_size_m
   camera_pitch_deg: 90.0       # lens below the horizon: 90 = straight down, 45 = the old mount (deg)
   camera_forward_m: 0.08       # lens position from the drone centre: forward (m) - MEASURE
   camera_right_m: 0.0          #   right (m)
@@ -157,16 +160,23 @@ localisation:                  # known tags for drift correction + precision lan
   # drone square on the home tag, facing along the search length.
   # Set by clicking the grid: python mission/tools/loc_layout.py (ids 22-29;
   # the tag on the start node is the home tag).
+  tag_size_m: 0.127              # printed size of the LOCALISATION tags' black square (m), if it
+                               # differs from the search tags'; 0 = same as tags.tag_size_m
   home_tag_id: 29              # centre of the start box: precision landing + start/end drift fix
   tags:
     - {id: 29, x: 0.0, y: 0.0}   # home tag, start node (0, 0)
     - {id: 23, x: 1.38, y: 0.92}   # node (2, 3)
     - {id: 22, x: 2.3, y: -0.46}   # node (-1, 5)
     - {id: 24, x: 3.22, y: -1.38}   # node (-3, 7)
+    - {id: 25, x: 3.68, y: 0.0}   # node (0, 8)
     - {id: 27, x: 4.6, y: -1.38}   # node (-3, 10)
     - {id: 28, x: 4.6, y: 0.92}   # node (2, 10)
   # Drift correction, run when the tag report is made (after the return, before
   # landing).  Never sent to the drone: it only corrects the REPORTED tag positions.
+  drift_model: auto            # how the tag report is corrected: global (one transform, `model`
+                               # below) | time (drift at each visit, interpolated in time to when
+                               # each tag was seen) | hybrid (both) | auto (whichever predicts the
+                               # visits best, leave-one-out). auto: 2-7 cm vs 14-20 cm global
   model: similarity            # similarity (turn + scale + shift) | rigid (turn + shift) | translation
                                # falls back to fewer degrees of freedom if a fit fails its checks
   visit_gap_s: 5.0             # sightings of one tag this far apart in time are separate visits (s)

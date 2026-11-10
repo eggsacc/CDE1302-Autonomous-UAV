@@ -90,7 +90,8 @@ from drone_link import DroneLink, Pose
 from gyro_cal import GyroCalError
 from interfaces import DroneInterface, SightingSource
 from localisation import (LOC_FIX_FIELDS, TAGS_CORRECTED_FIELDS, LocFit, LocTags, correct,
-                          corrected_rows, fix_rows, format_report)
+                          correct_with, corrected_rows, drift_correction, fix_rows,
+                          format_report)
 from mission_log import MissionLog, format_wall
 from mission_state import MissionState
 from settings import Area, ConfigError, DEFAULT_CONFIG_PATH, Settings, load_settings
@@ -205,6 +206,8 @@ class Mission:
         self.gyro_cal_ok = False                 # a `calibrate` succeeded this session
         self.land_target: Optional[tuple[float, float]] = None   # home, or the home tag
         self.loc_fit: Optional[LocFit] = None    # set by report()
+        self.loc_drift = None                    # localisation.DriftCorrection, set by report()
+        self.corrected_tags: list = []           # localisation.CorrectedTag, set by report()
         self._correcting = False                 # precision landing: a move is playing
         self._land_corrections = 0
         self._land_tag_ignored = False
@@ -1043,9 +1046,11 @@ class Mission:
             import correction_plot as cp
             folder = self.log.folder
             traj = cp.read_trajectory(folder / "trajectory.csv")
-            rows = cp.correct_trajectory(self.loc_fit, traj)
+            t0 = self.log.mission_elapsed(0.0) or 0.0          # mission_s -> sighting clock
+            rows = cp.correct_trajectory(self.loc_fit, traj, self.loc_drift,
+                                         t_of=lambda ms: ms - t0)
             cp.write_csv(folder / "trajectory_corrected.csv", cp.TRAJ_CORRECTED_FIELDS, rows)
-            tags = correct(self.loc_fit, self.tag_map.estimates(confirmed_only=True))
+            tags = self.corrected_tags
 
             def stamp(t: float) -> str:
                 return (f"T+{self.log.mission_elapsed(t) or 0.0:.1f} s  "
@@ -1053,7 +1058,8 @@ class Mission:
 
             path = cp.plot_correction(folder / "correction.png", self.settings, self.loc_fit,
                                       rows, tags, {g.id: (g.x, g.y) for g in lo.truth_tags},
-                                      f"Run {folder.name}: recorded vs corrected", stamp)
+                                      f"Run {folder.name}: recorded vs corrected", stamp,
+                                      self.loc_drift)
             self.log.event("CORRECTION_SAVED", f"{path.name}, trajectory_corrected.csv")
         except Exception as exc:                     # never let a picture break shutdown
             log.exception("could not save the correction picture")
@@ -1062,9 +1068,12 @@ class Mission:
     def _localise(self, tags: list[TagEstimate]) -> str:
         """Fit the localisation tags and write the corrected report."""
         fit = self.loc_fit = self.loc.solve()
-        corrected = correct(fit, tags)
+        lo, tg = self.settings.localisation, self.settings.tags
+        corr = self.loc_drift = drift_correction(fit, lo)
+        corrected = self.corrected_tags = correct_with(
+            corr, tags, self.loc.search_samples(), tg.confirm_radius_m, tg.outlier_radius_m)
         mission_s = self.log.mission_elapsed
-        text = format_report(fit, corrected, mission_s)
+        text = format_report(fit, corrected, mission_s, corr)
         truth = {g.id: (g.x, g.y) for g in self.settings.localisation.truth_tags}
         if truth:
             from correction_plot import format_errors, tag_errors
@@ -1073,6 +1082,7 @@ class Mission:
         self.log.write_rows("localisation.csv", LOC_FIX_FIELDS, fix_rows(fit, mission_s))
         self.log.write_rows("tags_corrected.csv", TAGS_CORRECTED_FIELDS, corrected_rows(corrected))
         self.log.event("LOC_FIT" if fit.ok else "LOC_FIT_FAILED", fit.summary())
+        self.log.event("LOC_DRIFT", corr.describe())
         return text
 
     # -- display ------------------------------------------------------------
@@ -1123,6 +1133,7 @@ def build(settings: Settings, *, sim: bool = False, dry_run: bool = False,
             loc.add(s)
         else:
             tag_map.add(s)
+            loc.add_search(s)                # with its time, for the drift correction
 
     drone: DroneInterface
     source: SightingSource

@@ -218,6 +218,26 @@ wrong, fix `config.yaml` and add `--config mission/config.yaml`.
 Try it in the simulator by setting `sim.drift_scale`, `drift_rot_deg`,
 `drift_x_mps` and `drift_y_mps` (for example 0.05, 3, 0.0004, -0.0004).
 
+### Camera bench calibration
+
+Checks how accurately the camera places a tag, and works out the fix. No
+flying (props off): it only streams the camera. Close `mission.py` first.
+
+```bash
+python mission/tools/cam_bench.py
+```
+
+Put the drone on a stand, camera down, **level**, its centre over a grid node.
+Measure the lens height above the floor and type `h 0.80` (your number). Put a
+tag on a node and type where it is: `n 1 0` = 1 node right, `n 0 -1` = 1 node
+back (or `c <forward> <right>` in metres). Do 5-6 spots spread over the view
+(centre, forward, back, left, right, a corner), then `fit`. It reports the
+tag size the camera implies (compare with your ruler), the lens focal lengths,
+where the lens really sits, and whether the camera is twisted. `apply` writes
+`tags.tag_size_m`, `tags.camera_forward_m` / `_right_m` and `camera.fx` / `fy`
+into `config.yaml` (old file: `config.yaml.bak`). Enter alone shows the live
+reading.
+
 ## 6. Flying with UWB
 
 **Once:** set up the anchors in NAssistant (A0 is the origin), and set the

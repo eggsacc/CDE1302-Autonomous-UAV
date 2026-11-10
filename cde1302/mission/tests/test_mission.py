@@ -131,7 +131,7 @@ def test_lands_after_a_short_hover_over_home(tmp_path):
 
 
 def test_early_stop_when_all_tags_found(tmp_path):
-    r = Rig(configure(tmp_path))                              # stop_when_all_found: true
+    r = Rig(configure(tmp_path, flight={"stop_when_all_found": True}))
     r.until(lambda: r.m.phase == Phase.READY, 5)
     r.m.command("takeoff")
     r.finish()
@@ -586,7 +586,7 @@ def test_trajectory_refused_every_time_abort_lands(tmp_path):
 
 
 def test_early_stop_cancels_the_sweep_and_flies_home_by_trajectory(tmp_path):
-    r = Rig(configure(tmp_path))                              # stop_when_all_found: true
+    r = Rig(configure(tmp_path, flight={"stop_when_all_found": True}))
     r.until(lambda: r.m.phase == Phase.READY, 5)
     r.m.command("takeoff")
     r.finish()

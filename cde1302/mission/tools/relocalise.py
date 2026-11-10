@@ -49,8 +49,8 @@ from correction_plot import (TRAJ_CORRECTED_FIELDS, correct_trajectory,  # noqa:
                              format_errors, plot_correction, read_trajectory, tag_errors,
                              write_csv)
 from localisation import (LOC_FIX_FIELDS, TAGS_CORRECTED_FIELDS, LocSighting,  # noqa: E402
-                          correct, corrected_rows, find_fixes, fix_rows, format_report,
-                          solve_fixes)
+                          correct_with, corrected_rows, drift_correction, find_fixes,
+                          fix_rows, format_report, solve_fixes)
 from settings import ConfigError, Settings, load_settings  # noqa: E402
 from tag_map import TagMap  # noqa: E402
 
@@ -99,18 +99,27 @@ def clock_stamp(detections: list[SimpleNamespace]) -> Callable[[float], str]:
 
 def relocalise(settings: Settings, detections: list[SimpleNamespace]):
     """(fit, corrected tags) from logged sightings, as the mission makes them."""
-    lo = settings.localisation
-    tag_map = TagMap.from_settings(settings.tags)
-    loc_rows = []
+    fit, _, tags = relocalise_full(settings, detections)
+    return fit, tags
+
+
+def relocalise_full(settings: Settings, detections: list[SimpleNamespace]):
+    """(fit, drift correction, corrected tags) from logged sightings."""
+    lo, tg = settings.localisation, settings.tags
+    tag_map = TagMap.from_settings(tg)
+    loc_rows, samples = [], {}
     for d in sorted(detections, key=lambda d: d.t):
         if d.tag_id in lo.ids:
             loc_rows.append(LocSighting(d.tag_id, d.t, d.x, d.y))
         else:
             tag_map.add(SimpleNamespace(tag_id=d.tag_id, x=d.x, y=d.y, t_detect=d.t))
-    fixes = find_fixes(loc_rows, lo, settings.tags.confirm_radius_m,
-                       settings.tags.outlier_radius_m)
+            samples.setdefault(d.tag_id, []).append((d.t, d.x, d.y))
+    fixes = find_fixes(loc_rows, lo, tg.confirm_radius_m, tg.outlier_radius_m)
     fit = solve_fixes(fixes, lo)
-    return fit, correct(fit, tag_map.estimates(confirmed_only=True))
+    corr = drift_correction(fit, lo)
+    tags = correct_with(corr, tag_map.estimates(confirmed_only=True), samples,
+                        tg.confirm_radius_m, tg.outlier_radius_m)
+    return fit, corr, tags
 
 
 def parse_truth(spec: Optional[str]) -> dict[int, tuple[float, float]]:
@@ -160,12 +169,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     detections = read_detections(run / "detections.csv")
-    fit, tags = relocalise(settings, detections)
+    fit, corr, tags = relocalise_full(settings, detections)
     traj = read_trajectory(run / "trajectory.csv") if (run / "trajectory.csv").is_file() else []
-    traj_rows = correct_trajectory(fit, traj)
+    traj_rows = correct_trajectory(fit, traj, corr)
     errors = tag_errors(tags, truth)
     print(f"run {run}\nsettings {cfg}")
-    print(format_report(fit, tags))
+    print(format_report(fit, tags, corr=corr))
     if errors:
         print(format_errors(errors))
     if args.write:
@@ -178,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.plot is not None:
         out = Path(args.plot) if args.plot else run / "correction.png"
         plot_correction(out, settings, fit, traj_rows, tags, truth,
-                        f"Run {run.name}: recorded vs corrected", clock_stamp(detections))
+                        f"Run {run.name}: recorded vs corrected", clock_stamp(detections), corr)
         print(f"wrote {out}")
     return 0 if fit.ok else 1
 

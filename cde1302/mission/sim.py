@@ -461,7 +461,7 @@ class SimTagSource:
         self._clock = clock
         self._threaded = threaded
         self._rng = rng or random.Random(settings.sim.seed + 1)
-        self._filter = TagFilter(settings.tags)
+        self._filter = TagFilter(settings.tags)     # true geometry: no per-id size scaling
         # Floor tags: the mission's true tags plus the localisation tags.
         loc = settings.localisation
         self.floor_tags = tuple(settings.sim.true_tags) + (tuple(loc.tags) if loc.enabled else ())

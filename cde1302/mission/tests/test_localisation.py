@@ -13,6 +13,8 @@ import pytest
 from localisation import (Fix, LocSighting, LocTags, Transform2D, correct, find_fixes,
                           fit_transform, solve_fixes)
 from mission import Phase
+import settings as settings_mod  # noqa: E402
+import yaml  # noqa: E402
 from settings import ConfigError, load_settings, settings_from_dict
 from test_mission import Rig, configure, required
 
@@ -333,8 +335,9 @@ def test_offline_tool_plots_and_corrects_the_route(tmp_path):
     with open(run / "trajectory_corrected.csv", newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
     assert len(rows) > 100
-    # The corrected route ends back on the home tag's true spot (0, 0), within a few cm.
-    assert math.hypot(float(rows[-1]["x"]), float(rows[-1]["y"])) < 0.05
+    # The corrected route ends back on the home tag's true spot (0, 0), within a few cm
+    # (the sim drone itself lands within ~3 cm; the route is corrected in time).
+    assert math.hypot(float(rows[-1]["x"]), float(rows[-1]["y"])) < 0.08
     fit, tags = tool.relocalise(r.m.settings, tool.read_detections(run / "detections.csv"))
     errs = tool.tag_errors(tags, tool.parse_truth(truth))
     assert all(e["corr_err"] < e["raw_err"] for e in errs if e["raw_err"] and e["raw_err"] > 0.05)
@@ -362,3 +365,79 @@ def test_mission_saves_the_correction_picture_after_landing(tmp_path):
     names = [e["event"] for e in r.events()]
     assert names.index("CORRECTION_SAVED") > names.index("LAND_CMD")   # never before landing
     assert any("TAG ERRORS vs TRUE POSITIONS" in ln for ln in r.lines)
+
+
+# ---------------------------------------------------------------------------
+# Drift that changes during the flight (localisation.drift_model)
+# ---------------------------------------------------------------------------
+
+from localisation import DriftCorrection, correct_with, drift_correction  # noqa: E402
+
+GRID = [(29, 0.0, 0.0), (23, 1.38, 0.92), (22, 2.30, -0.46), (24, 3.22, -1.38),
+        (27, 4.60, -1.38), (28, 4.60, 0.92), (25, 3.68, 0.0)]
+
+
+def creeping_fixes(rate=(0.004, -0.003), turn_deg=0.0):
+    """Visits over 90 s while PX4's position creeps (and optionally its frame is turned)."""
+    p = math.radians(turn_deg)
+    fx = []
+    for i, (tid, x, y) in enumerate(GRID + [(29, 0.0, 0.0)]):
+        t = 5.0 + 12.0 * i
+        rx, ry = math.cos(p) * x - math.sin(p) * y, math.sin(p) * x + math.cos(p) * y
+        fx.append(Fix(tid, 1, t, t + 2.0, 20, (rx + rate[0] * t, ry + rate[1] * t), (x, y), 0.01))
+    return fx
+
+
+def _lo(**kw):
+    return dataclasses.replace(load_settings().localisation, **kw)
+
+
+def test_auto_picks_time_for_a_creeping_drift():
+    fixes = creeping_fixes()
+    corr = drift_correction(solve_fixes(fixes, _lo()), _lo())
+    assert corr.model == "time"
+    loo = dict(corr.loo_cm)
+    assert loo["time"] < loo["global"] / 3          # the end visits can only be extrapolated
+    # a tag seen at t=50 s at its drifted spot comes out at its true spot
+    true = (2.0, 0.5)
+    seen = (true[0] + 0.004 * 51, true[1] - 0.003 * 51)
+    assert corr.apply(51.0, *seen) == pytest.approx(true, abs=0.005)
+
+
+def test_auto_picks_a_transform_for_a_turned_frame():
+    fixes = creeping_fixes(rate=(0.0, 0.0), turn_deg=6.0)
+    corr = drift_correction(solve_fixes(fixes, _lo()), _lo())
+    assert corr.model in ("global", "hybrid") and dict(corr.loo_cm)["global"] < 1.0
+    assert corr.apply(30.0, 4.0 * math.cos(math.radians(6)), 4.0 * math.sin(math.radians(6))) \
+        == pytest.approx((4.0, 0.0), abs=0.01)
+
+
+def test_drift_model_can_be_forced():
+    fixes = creeping_fixes()
+    corr = drift_correction(solve_fixes(fixes, _lo(drift_model="global")), _lo(drift_model="global"))
+    assert corr.model == "global" and corr.loo_cm == ()
+
+
+def test_each_sighting_is_corrected_at_its_own_time():
+    corr = DriftCorrection("time", knot_t=(0.0, 100.0), knot_dx=(0.0, -0.4), knot_dy=(0.0, 0.0))
+    tag = type("E", (), {"tag_id": 4, "x": 1.2, "y": 0.0, "n_inliers": 2, "first_seen_t": 0.0})()
+    # seen twice: at t=0 (no drift) and t=100 (+0.4 m drift): both are really at x = 1.0
+    samples = {4: [(0.0, 1.0, 0.0)] * 3 + [(100.0, 1.4, 0.0)] * 3}
+    c = correct_with(corr, [tag], samples)[0]
+    assert (c.x, c.y) == pytest.approx((1.0, 0.0), abs=1e-6)
+
+
+def test_bad_drift_model_is_rejected():
+    raw = yaml.safe_load(settings_mod.DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+    raw["localisation"]["drift_model"] = "magic"
+    with pytest.raises(ConfigError, match="drift_model"):
+        settings_from_dict(raw)
+
+
+def test_mission_reports_the_drift_correction(tmp_path):
+    r = fly(tmp_path, sim=DRIFT)
+    assert r.m.loc_drift is not None and r.m.loc_drift.ok
+    assert r.events("LOC_DRIFT") and any("drift correction:" in ln for ln in r.lines)
+    truth = {t.id: (t.x, t.y) for t in r.m.settings.sim.true_tags}
+    errs = [math.dist((c.x, c.y), truth[c.tag_id]) for c in r.m.corrected_tags]
+    assert max(errs) < 0.04

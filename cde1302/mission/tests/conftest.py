@@ -24,11 +24,16 @@ TEST_ARENA = {
     "area": {"x_min": 0.0, "x_max": 3.5, "y_min": -0.5, "y_max": 1.0, "margin": 0.0},
     "sweep": {"lane_spacing": 0.5},
     "flight": {"cruise_speed_mps": 0.15},
-    "tags": {"expected_down_m": 0.5, "max_down_m": 0.65},   # the sim and synthetic camera fly 0.5 m
+    # the sim and the synthetic camera (synth_camera.py) fly 0.5 m with the lens 2 cm ahead
+    # (apriltag_host.CAM_POS_M): the pipeline must use the same, or every tag is off by the gap
+    # ... and draws 120 mm tags of both kinds (the team's printed sizes are in config.yaml)
+    "tags": {"expected_down_m": 0.5, "max_down_m": 0.65, "camera_forward_m": 0.02,
+             "camera_right_m": 0.0, "camera_down_m": 0.0,
+             "tag_size_m": 0.12},
     "localisation": {"tags": [{"id": 29, "x": 0.0, "y": 0.0},
                               {"id": 27, "x": 3.3, "y": -0.3},
                               {"id": 28, "x": 3.3, "y": 0.8}],
-                     "truth_tags": []},
+                     "truth_tags": [], "tag_size_m": 0.0},
 }
 
 

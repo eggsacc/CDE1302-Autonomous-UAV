@@ -28,6 +28,7 @@ DEFAULT_CONFIG_PATH = MISSION_DIR / "config.yaml"
 FIRMWARE_SPEED_CAP_MPS = 0.50    # MAV_CMD_SPEED_CAP_MS in main/mavlink_task.h
 TAG16H5_MAX_ID = 29              # components/esp-apriltag/apriltag/tag16h5.c: ids 0-29
 LOC_MODELS = ("similarity", "rigid", "translation")   # localisation.py, most to fewest DOF
+DRIFT_MODELS = ("auto", "global", "time", "hybrid")   # localisation.drift_correction
 
 
 class ConfigError(ValueError):
@@ -114,6 +115,8 @@ class Camera:
     capture_latency_bias_s: float = 0.0
     use_frame_pose: bool = True        # drone pose sent inside each frame (no Wi-Fi delay)
     max_frame_pose_gap_ms: int = 100   # ignore a frame pose this far from a PX4 sample
+    fx: float = 0.0                    # lens focal length (px); 0 = the course's (apriltag_host)
+    fy: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -195,6 +198,8 @@ class Localisation:
     align_to_home_tag: bool = True
     align_max_deg: float = 15.0
     save_plot: bool = True             # correction.png + trajectory_corrected.csv after landing
+    tag_size_m: float = 0.0            # printed size of the localisation tags; 0 = tags.tag_size_m
+    drift_model: str = "auto"          # global | time | hybrid | auto (leave-one-out picks)
     truth_tags: tuple[TrueTag, ...] = ()   # test flights: true search-tag spots, for errors
     land_window_s: float = 2.0
     land_min_sightings: int = 5
@@ -435,6 +440,7 @@ def validate(s: Settings) -> None:
                   "expected_down_m", "down_tolerance_m", "expected_count")
     _check(all(abs(v) <= 0.5 for v in t.camera_pos_m),
            f"tags.camera_forward_m/right_m/down_m must be within 0.5 m (got {t.camera_pos_m})")
+    _non_negative(c, "camera", "fx", "fy")
     _check(0 <= c.max_frame_pose_gap_ms <= 1000,
            "camera.max_frame_pose_gap_ms must be 0-1000")
     _check(0.0 <= t.camera_pitch_deg <= 90.0,
@@ -479,6 +485,10 @@ def validate(s: Settings) -> None:
                   "land_max_corrections")
     _check(0.0 < lo.align_max_deg < 45.0,
            f"localisation.align_max_deg must be between 0 and 45 (got {lo.align_max_deg})")
+    _non_negative(lo, "localisation", "tag_size_m")
+    _check(lo.drift_model in DRIFT_MODELS,
+           f"localisation.drift_model must be one of {', '.join(DRIFT_MODELS)} "
+           f"(got {lo.drift_model!r})")
     _check(lo.max_scale_error < 1.0,
            f"localisation.max_scale_error must be < 1 (got {lo.max_scale_error})")
     if lo.enabled:

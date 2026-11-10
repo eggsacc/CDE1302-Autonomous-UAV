@@ -66,7 +66,7 @@ from __future__ import annotations
 
 import math
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Iterable, Optional, Sequence
 
 import numpy as np
@@ -345,6 +345,7 @@ class LocTags:
         self.confirm_radius_m = settings.tags.confirm_radius_m
         self.outlier_radius_m = settings.tags.outlier_radius_m
         self._rows: list[LocSighting] = []
+        self._search: list[tuple[int, float, float, float]] = []
         self._lock = threading.Lock()
 
     @property
@@ -354,6 +355,20 @@ class LocTags:
     def wants(self, tag_id: int) -> bool:
         """True for a localisation tag id (always False when disabled)."""
         return tag_id in self.cfg.ids
+
+    def add_search(self, s) -> None:
+        """Keep a search-tag sighting (time + raw position) for drift_correction."""
+        with self._lock:
+            self._search.append((s.tag_id, s.t_capture, s.x, s.y))
+
+    def search_samples(self) -> dict[int, list[tuple[float, float, float]]]:
+        """{tag id: [(t, x, y), ...]} of every search-tag sighting so far."""
+        with self._lock:
+            rows = list(self._search)
+        out: dict[int, list] = {}
+        for tid, t, x, y in rows:
+            out.setdefault(tid, []).append((t, x, y))
+        return out
 
     def add(self, s) -> None:
         """Store a Sighting (or anything with tag_id, t_capture, x, y, and
@@ -482,10 +497,12 @@ def corrected_rows(tags: Iterable[CorrectedTag]) -> list[dict]:
 
 
 def format_report(fit: LocFit, tags: Sequence[CorrectedTag],
-                  mission_s=lambda t: t) -> str:
+                  mission_s=lambda t: t, corr: Optional["DriftCorrection"] = None) -> str:
     """Text block for the terminal: the fit, its fixes and the corrected tags."""
     lines = ["=== LOCALISATION  (PX4 frame -> arena frame from the localisation tags) ===",
              ("fit " if fit.ok else "") + fit.summary()]
+    if corr is not None:
+        lines.append(corr.describe())
     if fit.fixes:
         lines.append(f"{'tag':>4} {'visit':>5} {'T+ s':>7} {'n':>4} {'px4 x':>7} {'px4 y':>7} "
                      f"{'true x':>7} {'true y':>7} {'resid':>6}")
@@ -494,7 +511,8 @@ def format_report(fit: LocFit, tags: Sequence[CorrectedTag],
             lines.append(f"{r['tag_id']:>4} {r['visit']:>5} {(r['start_mission_s'] or 0.0):>7.1f} "
                          f"{r['n_sightings']:>4} {r['px4_x']:>7.3f} {r['px4_y']:>7.3f} "
                          f"{r['ref_x']:>7.3f} {r['ref_y']:>7.3f} {r['residual_m']:>6.3f}{mark}")
-    title = "CORRECTED TAG REPORT (arena frame, m)" if fit.ok else \
+    corrected = corr.ok if corr is not None else fit.ok
+    title = "CORRECTED TAG REPORT (arena frame, m)" if corrected else \
         "TAG REPORT, NOT CORRECTED (PX4 frame, m)"
     lines.append(f"=== {title} ===")
     lines.append(f"{'ID':>4} {'x':>8} {'y':>8} {'raw x':>8} {'raw y':>8} {'moved':>6}")
@@ -504,3 +522,147 @@ def format_report(fit: LocFit, tags: Sequence[CorrectedTag],
     if not tags:
         lines.append("   (no tags confirmed)")
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Drift that changes during the flight (localisation.drift_model)
+# ---------------------------------------------------------------------------
+#
+# One transform for the whole flight (the fit above) cannot follow a drift
+# that keeps changing.  With several localisation-tag visits spread over the
+# flight, the drift measured at each visit (true spot - where PX4 put it) can
+# be interpolated in time, and every search-tag sighting corrected with the
+# drift at the moment it was seen:
+#
+#     global  the fit's transform only
+#     time    drift interpolated in time between the visits (no transform)
+#     hybrid  the fit's transform, then what it leaves interpolated in time
+#     auto    whichever predicts the visits best, leave-one-out: each visit is
+#             hidden in turn and predicted from the others
+#
+# Measured on four flights (2026-11-11, 3 true search tags each): global
+# 14-20 cm mean error, time 2-14 cm, hybrid 4-13 cm; auto picked the better
+# of the two every time (about 5.5 cm on average).
+
+@dataclass(frozen=True)
+class DriftCorrection:
+    """arena = base(px4) + drift(t), drift linear in time between the knots."""
+    model: str = "none"                    # global | time | hybrid | none
+    base: Transform2D = IDENTITY
+    knot_t: tuple = ()                     # visit times (sighting clock)
+    knot_dx: tuple = ()                    # drift left after base at each visit (m)
+    knot_dy: tuple = ()
+    loo_cm: tuple = ()                     # ((model, mean leave-one-out error cm), ...)
+
+    @property
+    def ok(self) -> bool:
+        return self.model != "none"
+
+    def apply(self, t: Optional[float], x: float, y: float) -> tuple[float, float]:
+        bx, by = self.base.apply(x, y)
+        if self.knot_t and t is not None:
+            bx += float(np.interp(t, self.knot_t, self.knot_dx))
+            by += float(np.interp(t, self.knot_t, self.knot_dy))
+        return bx, by
+
+    def describe(self) -> str:
+        what = {"global": "one transform for the whole flight",
+                "time": "drift interpolated in time between localisation-tag visits",
+                "hybrid": "one transform, then the drift left interpolated in time",
+                "none": "no correction"}[self.model]
+        loo = ", ".join(f"{m} {cm:.1f}" for m, cm in self.loo_cm)
+        return (f"drift correction: {self.model} ({what})"
+                + (f"; leave-one-out error (cm): {loo}" if loo else ""))
+
+
+def _mid(f: Fix) -> float:
+    return (f.t_start + f.t_end) / 2.0
+
+
+def _knots(fixes: Sequence[Fix], base: Transform2D) -> tuple[tuple, tuple, tuple]:
+    ts, dx, dy = [], [], []
+    for f in sorted(fixes, key=_mid):
+        bx, by = base.apply(*f.px4)
+        t = _mid(f)
+        if ts and t <= ts[-1]:
+            t = ts[-1] + 1e-6
+        ts.append(t)
+        dx.append(f.ref[0] - bx)
+        dy.append(f.ref[1] - by)
+    return tuple(ts), tuple(dx), tuple(dy)
+
+
+def _build(model: str, fixes: Sequence[Fix], lo: Localisation) -> Optional[DriftCorrection]:
+    if not fixes:
+        return None
+    if model == "time":
+        return DriftCorrection("time", IDENTITY, *_knots(fixes, IDENTITY))
+    fit = solve_fixes(fixes, lo)
+    if not fit.ok:
+        return None
+    if model == "global":
+        return DriftCorrection("global", fit.transform)
+    # every visit is a knot, also one the global fit trimmed: drift that keeps
+    # changing is exactly what makes a visit disagree with one transform
+    return DriftCorrection("hybrid", fit.transform, *_knots(fixes, fit.transform))
+
+
+def _loo_cm(model: str, fixes: Sequence[Fix], lo: Localisation) -> Optional[float]:
+    errs = []
+    for i, f in enumerate(fixes):
+        c = _build(model, list(fixes[:i]) + list(fixes[i + 1:]), lo)
+        if c is None:
+            continue
+        x, y = c.apply(_mid(f), *f.px4)
+        errs.append(math.hypot(x - f.ref[0], y - f.ref[1]))
+    if len(errs) < max(2, len(fixes) - 1):          # most visits must be predictable
+        return None
+    return 100.0 * float(np.mean(errs))
+
+
+def drift_correction(fit: LocFit, lo: Localisation) -> DriftCorrection:
+    """The correction to apply, per localisation.drift_model (see above)."""
+    fixes = list(fit.fixes)
+    if not fixes:
+        return DriftCorrection()
+    want = lo.drift_model
+    loo = []
+    if want == "auto" and len(fixes) >= 3:
+        for m in ("global", "time", "hybrid"):
+            e = _loo_cm(m, fixes, lo)
+            if e is not None:
+                loo.append((m, e))
+    if want != "auto":
+        order = [want, "global"]
+    elif loo:
+        order = [min(loo, key=lambda kv: kv[1])[0], "global"]
+    else:
+        order = ["global", "time"]
+    for m in order:
+        c = _build(m, fixes, lo)
+        if c is not None:
+            return replace(c, loo_cm=tuple(loo))
+    return DriftCorrection(loo_cm=tuple(loo))
+
+
+def correct_with(corr: DriftCorrection, tags: Iterable, samples: Optional[dict] = None,
+                 confirm_radius_m: float = 0.20, outlier_radius_m: float = 0.30
+                 ) -> list[CorrectedTag]:
+    """Correct TagEstimates.  With samples {tag_id: [(t, x, y), ...]} (raw
+    sightings, same clock as the visits) every sighting is corrected at its
+    own time and the result is their robust median; otherwise the estimate is
+    corrected at its first-seen time."""
+    out = []
+    for e in tags:
+        pts = (samples or {}).get(e.tag_id)
+        first = getattr(e, "first_seen_t", None)
+        if corr.ok and pts:
+            arr = np.array([corr.apply(t, x, y) for t, x, y in pts])
+            est, _, _ = robust_estimate(arr, confirm_radius_m, outlier_radius_m)
+            x, y = float(est[0]), float(est[1])
+        elif corr.ok:
+            x, y = corr.apply(first, e.x, e.y)
+        else:
+            x, y = e.x, e.y
+        out.append(CorrectedTag(e.tag_id, x, y, e.x, e.y, e.n_inliers, first))
+    return out

@@ -83,12 +83,31 @@ def capture_time(first_rx: float, age_ms: int, bias_s: float = 0.0) -> float:
     return first_rx - age_ms / 1000.0 - bias_s
 
 
-class TagFilter:
-    """Turns one Detection + drone pose history into a Sighting, or a reason not to."""
+def size_scales(tags: Tags, loc=None) -> dict[int, float]:
+    """Per tag id: real size / the size the detector assumed (tags.tag_size_m).
 
-    def __init__(self, tags: Tags) -> None:
+    The tag pose scales exactly with the tag size, so a tag printed at 90 %
+    of tags.tag_size_m reads 1/0.9 too far in every direction; multiplying
+    its translation by 0.9 puts it right.  Only localisation tags
+    (localisation.tag_size_m > 0) differ from the search tags.
+    """
+    if loc is None or not loc.enabled or not loc.tag_size_m:
+        return {}
+    k = loc.tag_size_m / tags.tag_size_m
+    return {i: k for i in loc.ids} if abs(k - 1.0) > 1e-9 else {}
+
+
+class TagFilter:
+    """Turns one Detection + drone pose history into a Sighting, or a reason not to.
+
+    loc: settings.localisation, to read the localisation tags at their own
+    printed size (size_scales).  None: every tag is tags.tag_size_m.
+    """
+
+    def __init__(self, tags: Tags, loc=None) -> None:
         self.cfg = tags
         self._max_yaw_rate = math.radians(tags.max_yaw_rate_deg_s)
+        self._scale = size_scales(tags, loc)
 
     def evaluate(self, det: Detection, t_capture: float, t_detect: float,
                  poses: PoseSource, frame_pose: Optional[FramePose] = None
@@ -103,10 +122,12 @@ class TagFilter:
             return None, R_GATE
         if det.t is None or det.pose_err is None:
             return None, R_NO_POSE
-        body = camera_to_body(det.t, c.camera_pitch_deg, c.camera_pos_m)
+        k = self._scale.get(det.id, 1.0)
+        cam_t = det.t if k == 1.0 else tuple(v * k for v in det.t)
+        body = camera_to_body(cam_t, c.camera_pitch_deg, c.camera_pos_m)
         if det.pose_err > c.max_pose_err:
             return None, R_POSE_ERR
-        if det.range_m > c.max_detect_range_m:
+        if math.sqrt(sum(v * v for v in cam_t)) > c.max_detect_range_m:
             return None, R_RANGE
         if c.tags_on_floor:
             if abs(body[2] - c.expected_down_m) > c.down_tolerance_m:
@@ -129,7 +150,7 @@ class TagFilter:
         x, y = body_to_ned(body[0], body[1], drone.x, drone.y, drone.heading)
         return Sighting(tag_id=det.id, t_capture=t_capture, t_detect=t_detect,
                         x=x, y=y, body=tuple(body), drone=drone,
-                        cam_t=det.t, cam_R=det.R, pose_err=det.pose_err,
+                        cam_t=cam_t, cam_R=det.R, pose_err=det.pose_err,
                         decision_margin=det.decision_margin), None
 
 
@@ -196,6 +217,16 @@ class PipelineStats:
                 f"rejected: {rej}")
 
 
+def camera_intrinsics(settings: Settings):
+    """The lens model for the tag pose: camera.fx / fy (tools/cam_bench.py)
+    override the course's FIRMWARE_INTRINSICS; 0 keeps them."""
+    from dataclasses import replace as _replace
+    from apriltag_host import FIRMWARE_INTRINSICS
+    c = settings.camera
+    return _replace(FIRMWARE_INTRINSICS, fx=c.fx or FIRMWARE_INTRINSICS.fx,
+                    fy=c.fy or FIRMWARE_INTRINSICS.fy)
+
+
 class TagPipeline:
     """Background thread: camera stream -> detections -> Sightings."""
 
@@ -223,7 +254,7 @@ class TagPipeline:
         self._clock = clock
         self._detector_factory = detector_factory
         self._bind_host = bind_host
-        self._filter = TagFilter(settings.tags)
+        self._filter = TagFilter(settings.tags, settings.localisation)
         cam = settings.camera
         self._keepalive = build_camera_stream_command(True, cam.fps, cam.quality)
         self._stats = PipelineStats()
@@ -246,9 +277,11 @@ class TagPipeline:
             apriltag_host.ApriltagHostError: detector could not be built.
         """
         t = self.settings.tags
-        self._detector = self._detector_factory(
-            tag_size_m=t.tag_size_m, min_margin=t.min_decision_margin,
-            max_hamming=t.max_hamming)
+        kw = dict(tag_size_m=t.tag_size_m, min_margin=t.min_decision_margin,
+                  max_hamming=t.max_hamming)
+        if self.settings.camera.fx or self.settings.camera.fy:   # calibrated lens
+            kw["intrinsics"] = camera_intrinsics(self.settings)
+        self._detector = self._detector_factory(**kw)
         port = self.settings.network.camera_port
         rx = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         # No SO_REUSEADDR: a second viewer on this port must fail loudly.

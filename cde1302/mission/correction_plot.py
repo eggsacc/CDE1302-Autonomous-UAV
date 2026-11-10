@@ -51,12 +51,14 @@ def read_trajectory(path: Path) -> list[tuple[float, float, float]]:
     return out
 
 
-def correct_trajectory(fit: LocFit, traj) -> list[dict]:
-    """The recorded route mapped through the fit (unchanged when there is none)."""
+def correct_trajectory(fit: LocFit, traj, corr=None, t_of=lambda ms: ms) -> list[dict]:
+    """The recorded route mapped through the correction: corr (a
+    DriftCorrection, applied at each point's time t_of(mission_s)), else the
+    fit (unchanged when there is none)."""
     t = fit.transform if fit.ok else IDENTITY
     rows = []
     for ts, x, y in traj:
-        cx, cy = t.apply(x, y)
+        cx, cy = corr.apply(t_of(ts), x, y) if corr is not None and corr.ok else t.apply(x, y)
         rows.append({"mission_s": ts, "x_raw": x, "y_raw": y, "x": cx, "y": cy})
     return rows
 
@@ -100,7 +102,8 @@ def format_errors(rows: list[dict]) -> str:
 
 def plot_correction(path: Path, settings: Settings, fit: LocFit, traj_rows: list[dict],
                     tags: list[CorrectedTag], truth: dict, title: str,
-                    stamp: Callable[[float], str] = lambda t: f"T+{t:.1f} s") -> Path:
+                    stamp: Callable[[float], str] = lambda t: f"T+{t:.1f} s",
+                    corr=None) -> Path:
     """Save the before/after map.  East right / North up, like the live map.
 
     stamp: formats a sighting time (same clock as CorrectedTag.first_seen_t and
@@ -126,11 +129,14 @@ def plot_correction(path: Path, settings: Settings, fit: LocFit, traj_rows: list
     if traj_rows:
         ax.plot([r["y_raw"] for r in traj_rows], [r["x_raw"] for r in traj_rows], "-",
                 color=C_BEFORE, lw=2, zorder=2)
-        if fit.ok:
+        if fit.ok or (corr is not None and corr.ok):
             ax.plot([r["y"] for r in traj_rows], [r["x"] for r in traj_rows], "-",
                     color=C_AFTER, lw=2, zorder=3)
 
     t = fit.transform if fit.ok else IDENTITY
+    fixed = (lambda f: corr.apply((f.t_start + f.t_end) / 2, *f.px4)) \
+        if corr is not None and corr.ok else (lambda f: t.apply(*f.px4))
+    ok = fit.ok or (corr is not None and corr.ok)
     bbox = dict(boxstyle="round,pad=0.2", fc=C_BG, ec="none", alpha=0.85)
 
     # Localisation tags: the known spot, each visit as recorded -> as corrected,
@@ -142,10 +148,10 @@ def plot_correction(path: Path, settings: Settings, fit: LocFit, traj_rows: list
         ax.plot(ref.y, ref.x, "D", ms=11, mfc="none", mec=C_INK, mew=1.5, zorder=4)
         lines = [f"L{ref.id}  true ({ref.x:.2f}, {ref.y:.2f})"]
         for f in visits.get(ref.id, []):
-            cx, cy = t.apply(*f.px4)
+            cx, cy = fixed(f)
             ax.plot([f.px4[1], cy], [f.px4[0], cx], "-", color=C_BEFORE, lw=1, zorder=3)
             ax.plot(f.px4[1], f.px4[0], "D", ms=6, color=C_BEFORE, mec=C_BG, mew=1, zorder=4)
-            if fit.ok:
+            if ok:
                 ax.plot(cy, cx, "D", ms=6, color=C_AFTER, mec=C_BG, mew=1, zorder=5)
             lines.append(f"  ({cx:.2f}, {cy:.2f})  {stamp(f.t_start)}")
         if not visits.get(ref.id):
@@ -159,7 +165,7 @@ def plot_correction(path: Path, settings: Settings, fit: LocFit, traj_rows: list
         ax.annotate("", (c.y, c.x), (c.raw_y, c.raw_x),
                     arrowprops=dict(arrowstyle="->", color=C_INK2, lw=1), zorder=4)
         ax.plot(c.raw_y, c.raw_x, "s", ms=9, color=C_BEFORE, mec=C_BG, mew=1.5, zorder=5)
-        if fit.ok:
+        if ok:
             ax.plot(c.y, c.x, "s", ms=9, color=C_AFTER, mec=C_BG, mew=1.5, zorder=6)
         when = stamp(c.first_seen_t) if c.first_seen_t is not None else ""
         ax.annotate(f"{c.tag_id}  ({c.x:.2f}, {c.y:.2f})\n{when}", (c.y, c.x),
@@ -191,6 +197,8 @@ def plot_correction(path: Path, settings: Settings, fit: LocFit, traj_rows: list
               frameon=False)
 
     note = fit.summary() if fit.ok else f"NOT CORRECTED: {fit.reason}"
+    if corr is not None:
+        note += "\n" + corr.describe()
     errors = tag_errors(tags, truth)
     if errors:
         note += "\n\n" + format_errors(errors)
