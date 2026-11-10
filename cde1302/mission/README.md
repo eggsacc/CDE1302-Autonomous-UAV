@@ -27,6 +27,7 @@ From `cde1302/`.
 conda env create -f laptop/environment.yml
 conda activate cde1302-laptop
 conda install -c conda-forge gcc
+pip install pymavlink            # for `calibrate` (gyro calibration from the laptop)
 ```
 
 **ESP-IDF** (needed to flash; about 1 GB download), in PowerShell:
@@ -123,7 +124,14 @@ conda activate cde1302-laptop
 python mission/mission.py --map
 ```
 
-Type `takeoff`, then `start` once it says it's hovering. `land` lands,
+With the drone on the floor and **perfectly still**, type `calibrate`: PX4
+calibrates its gyros through the ESP32's MAVLink bridge (no QGroundControl
+needed; QGC must be **closed**, it uses the same port 14550). Wait for
+`GYRO_CAL_DONE`, about 5 s. Best after the drone has been powered for 1-2
+minutes, so the gyros are warm. `safety.require_gyro_cal: true` makes
+`takeoff` refuse until this has succeeded.
+
+Then type `takeoff`, and `start` once it says it's hovering. `land` lands,
 Ctrl+C lands and exits.
 
 Other ways to run it:
@@ -293,6 +301,12 @@ For a fair comparison, change only `uwb.send_to_px4` between flights.
 | Very slow | Raise `MPC_XY_VEL_MAX` and `MPC_XY_CRUISE` |
 | Pulls sideways with UWB | PX4 restarting UWB, or poor UWB coverage there. Check `cs_ev_pos` in the log, and the anchors' view of that area |
 | `uwb.mirror must be text` | Write `"yes"` with quotes |
+| `GYRO_CAL_FAILED ... close QGroundControl` | QGC is holding UDP 14550. Close it and type `calibrate` again |
+| `GYRO_CAL_FAILED ... motion` | The drone moved during calibration. Keep it still and retry |
+| `GYRO_CAL_FAILED ... no answer from PX4` | No MAVLink bridge reply: check the drone is on and pingable |
+| ESP-IDF: `supports Python 3.10 or newer but you are using 3.7` | pyenv's global Python is old. In that window: `$env:PYENV_VERSION = "3.10.0"` |
+| `idf_pinned.ps1 cannot be loaded because running scripts is disabled` | `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first |
+| ESP-IDF activation: `call ...activate_xxx.bat is not recognized` | pyenv's `python.bat` makes ESP-IDF think it runs in cmd.exe. `$env:ESP_IDF_SHELL = "powershell.exe"` before `idf_pinned.ps1` |
 | `LOC_FIT_FAILED` / report not corrected | Check `localisation.csv`: a tag never seen (it must pass under a lane), or a position measured wrong (one large residual) |
 | `apriltag_host` build error `CONDITION_VARIABLE` | An old `C:\MinGW` gcc is first on PATH. `conda activate cde1302-laptop` (it has MinGW-w64 gcc), then run again |
 

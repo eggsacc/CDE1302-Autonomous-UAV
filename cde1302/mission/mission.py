@@ -12,6 +12,7 @@ Run from the cde1302/ folder:
     add --map to any of these for a live map window (live_map.py)
 
 Operator commands (type + Enter, any time):
+    calibrate calibrate PX4's gyros, drone still   (READY; gyro_cal.py)
     takeoff   arm, take off and hover            (READY)
     start     begin the search                   (after hover; not needed with --auto)
     land      land immediately                   (any airborne state)
@@ -86,6 +87,7 @@ from protocol import NAV_ARRIVED, NAV_FLYING, NAV_IDLE, NAV_ROTATING, NAV_STUCK,
 
 import planner
 from drone_link import DroneLink, Pose
+from gyro_cal import GyroCalError
 from interfaces import DroneInterface, SightingSource
 from localisation import (LOC_FIX_FIELDS, TAGS_CORRECTED_FIELDS, LocFit, LocTags, correct,
                           corrected_rows, fix_rows, format_report)
@@ -119,7 +121,7 @@ class Phase(str, Enum):
 # States where the drone may be in the air: safety checks run, `land` works.
 AIRBORNE = (Phase.TAKING_OFF, Phase.HOVERING, Phase.EXPLORING, Phase.RETURNING)
 
-HELP = ("commands: takeoff | start | land | status | quit   "
+HELP = ("commands: calibrate | takeoff | start | land | status | quit   "
         "(Ctrl+C lands and exits)")
 
 
@@ -195,10 +197,12 @@ class Mission:
                  tag_map: TagMap, mlog: MissionLog, *,
                  waypoints: list[tuple[float, float]], auto: bool = False,
                  echo: Optional[Callable[[str], None]] = None,
-                 uwb=None, loc: Optional[LocTags] = None) -> None:
+                 uwb=None, loc: Optional[LocTags] = None, gyro_cal=None) -> None:
         validate_plan(waypoints, settings.area)
         self.settings = settings
         self.loc = loc if loc is not None else LocTags(settings)
+        self.gyro_cal = gyro_cal                 # gyro_cal.BridgeGyroCal / SimGyroCal or None
+        self.gyro_cal_ok = False                 # a `calibrate` succeeded this session
         self.land_target: Optional[tuple[float, float]] = None   # home, or the home tag
         self.loc_fit: Optional[LocFit] = None    # set by report()
         self._correcting = False                 # precision landing: a move is playing
@@ -265,6 +269,8 @@ class Mission:
         if self._started:
             self._started = False
             stops = [self.source.stop, self.drone.stop]
+            if self.gyro_cal is not None:
+                stops.insert(0, self.gyro_cal.close)
             if self.uwb is not None:
                 stops.insert(0, self.uwb.stop)
             for stop in stops:
@@ -312,6 +318,8 @@ class Mission:
                     log.info("start: search begins as soon as hover is confirmed")
                 else:
                     log.warning("start: only after takeoff (phase %s)", self.phase.value)
+            elif cmd == "calibrate":
+                self._start_gyro_cal(now)
             elif cmd == "status":
                 log.info(self.status_line(now))
             elif cmd in ("quit", "exit"):
@@ -342,6 +350,7 @@ class Mission:
             Phase.DONE: lambda _now: None,
         }[self.phase]
         handler(now)
+        self._tick_gyro_cal(now)
         self._tick_uwb(now)
         self.state.set(phase=self.phase.value, pose=self.drone.latest_pose(),
                        home=self.home, wp_index=self.wp_index,
@@ -381,7 +390,9 @@ class Mission:
                 log.info("DRY RUN: watching telemetry and tags, no flight commands. "
                          "Type `quit` or Ctrl+C to stop.")
             else:
-                log.info("Ready. Type `takeoff` to begin%s.  %s",
+                log.info("Ready. %sType `takeoff` to begin%s.  %s",
+                         "Drone still? Type `calibrate` first (gyros). "
+                         if self.gyro_cal is not None else "",
                          " (search follows automatically)" if self.auto else "", HELP)
         elif now - self._phase_t > self.settings.network.connect_timeout_s:
             self.log.event("ERROR", f"no telemetry from drone {self.settings.drone_id} "
@@ -395,7 +406,45 @@ class Mission:
             if self.dry_run:
                 log.info(self.status_line(now))
 
+    def _start_gyro_cal(self, now: float) -> None:
+        """`calibrate`: PX4 gyro calibration through the ESP32's MAVLink bridge."""
+        if self.gyro_cal is None:
+            log.warning("calibrate: not available")
+        elif self.phase != Phase.READY:
+            log.warning("calibrate: only on the ground, in READY (phase %s)", self.phase.value)
+        elif self.gyro_cal.busy:
+            log.warning("calibrate: already running")
+        else:
+            self.gyro_cal_ok = False
+            self.log.event("GYRO_CAL_START", "keep the drone perfectly still")
+            try:
+                self.gyro_cal.start(self.drone.esp_ip, now)
+            except (GyroCalError, OSError) as exc:
+                self.log.event("GYRO_CAL_FAILED", str(exc))
+                return
+            self.state.set(message="calibrating gyros: keep the drone still")
+
+    def _tick_gyro_cal(self, now: float) -> None:
+        if self.gyro_cal is None or not self.gyro_cal.busy:
+            return
+        result = self.gyro_cal.poll(now)
+        if result is None:
+            return
+        ok, text = result
+        self.gyro_cal_ok = ok
+        self.log.event("GYRO_CAL_DONE" if ok else "GYRO_CAL_FAILED", text)
+        self.state.set(message="gyros calibrated" if ok else f"gyro calibration failed: {text}")
+        if ok:
+            log.info("Gyros calibrated. Type `takeoff` when ready.")
+
     def _takeoff(self, now: float) -> None:
+        if self.gyro_cal is not None and self.gyro_cal.busy:
+            log.error("takeoff refused: gyro calibration still running")
+            return
+        if self.settings.safety.require_gyro_cal and not self.gyro_cal_ok:
+            log.error("takeoff refused: safety.require_gyro_cal is on; type `calibrate` "
+                      "(drone still) first")
+            return
         pose = self.drone.latest_pose()
         if pose is None or self.drone.is_stale(now):
             log.error("takeoff refused: no fresh telemetry")
@@ -1011,7 +1060,8 @@ class Mission:
 def build(settings: Settings, *, sim: bool = False, dry_run: bool = False,
           auto: bool = False, clock: Optional[Callable[[], float]] = None,
           threaded_source: bool = True,
-          echo: Optional[Callable[[str], None]] = None, uwb=None) -> Mission:
+          echo: Optional[Callable[[str], None]] = None, uwb=None,
+          gyro_cal=None) -> Mission:
     """Create the log, drone, tag map and sighting source and wire them together."""
     if sim:
         from sim import ScaledClock, SimDrone, SimTagSource
@@ -1024,6 +1074,9 @@ def build(settings: Settings, *, sim: bool = False, dry_run: bool = False,
     tag_map = TagMap.from_settings(settings.tags, on_confirm=lambda e: mlog.tag_confirmed(
         e.tag_id, e.x, e.y, e.support, t=e.confirmed_t))
     loc = LocTags(settings)
+
+    def cal_progress(text: str) -> None:
+        mlog.event("GYRO_CAL", text)
 
     def on_command(name: str, details: str) -> None:
         mlog.event(name, details)
@@ -1041,17 +1094,27 @@ def build(settings: Settings, *, sim: bool = False, dry_run: bool = False,
         drone = SimDrone(settings, clock, dry_run=dry_run, on_command=on_command)
         source = SimTagSource(settings, drone, on_sighting, clock=clock,
                               threaded=threaded_source)
+        if gyro_cal is None:
+            from gyro_cal import SimGyroCal
+            gyro_cal = SimGyroCal(settings, progress=cal_progress)
     else:
         from tag_pipeline import TagPipeline
         drone = DroneLink(settings, dry_run=dry_run, clock=clock, on_command=on_command)
         source = TagPipeline(settings, drone, lambda: drone.esp_ip, on_sighting, clock=clock)
+        if gyro_cal is None:
+            try:
+                from gyro_cal import BridgeGyroCal
+                gyro_cal = BridgeGyroCal(settings, progress=cal_progress)
+            except ImportError:                  # pymavlink missing: `calibrate` says so
+                log.warning("pymavlink not installed: `calibrate` unavailable "
+                            "(pip install pymavlink)")
         if (settings.uwb.send_to_px4 and not dry_run) or settings.uwb.record:
             from uwb_feed import UwbFeed
             uwb = UwbFeed(settings, on_reading=(lambda **f: mlog.uwb(mlog.now(), **f))
                           if settings.uwb.record else None)
     return Mission(settings, drone, source, tag_map, mlog,
                    waypoints=plan_waypoints(settings), auto=auto, echo=echo, uwb=uwb,
-                   loc=loc)
+                   loc=loc, gyro_cal=gyro_cal)
 
 
 def run(mission: Mission, *, period_s: float,

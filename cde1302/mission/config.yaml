@@ -40,6 +40,10 @@ network:
   connect_timeout_s: 30.0  # give up if no telemetry within this time (s)
   pose_history_s: 30.0     # how much timestamped telemetry to keep for pose lookups (s)
   pose_lookup_tolerance_s: 0.25  # a lookup up to this far past the newest pose returns it (s)
+  mavlink_bridge_port: 8888      # ESP32 port that forwards MAVLink to PX4 (`calibrate`); firmware
+                                 # CONFIG_MAVROS_BRIDGE_IN_PORT
+  mavlink_listen_port: 14550     # laptop port PX4's MAVLink comes back on (QGroundControl's too:
+                                 # close QGC before `calibrate`); CONFIG_MAVROS_BRIDGE_OUT_PORT
 
 flight:
   nav_mode: trajectory     # "trajectory": firmware plays the whole path, heading stays fixed
@@ -76,6 +80,8 @@ safety:
                                # trajectory by itself, so short Wi-Fi gaps do not stop it flying
   geofence_margin_m: 0.5       # abort-land if outside area (+ home) grown by this (m)
   mission_time_limit_s: 600.0  # after this, stop searching, return and land (s)
+  require_gyro_cal: false      # true: `takeoff` is refused until `calibrate` has succeeded
+  gyro_cal_timeout_s: 30.0     # give up on a gyro calibration after this (s)
 
 camera:
   fps: 0                       # stream rate 1-15 fps; 0 = firmware default (10)
@@ -119,6 +125,7 @@ sim:
   pose_noise_m: 0.0            # std dev of fake telemetry position noise (m)
   sighting_noise_m: 0.03       # std dev of fake tag body-frame position noise (m)
   latency_s: 0.13              # fake camera capture -> laptop delay (s)
+  gyro_cal_s: 2.0              # fake `calibrate` takes this long (s)
   view_half_width_m: 0.40      # fake camera sees a tag this far left/right of the drone (m)
   view_min_m: -0.35            # ...from this far ahead (negative = behind the drone)... (m)
   view_max_m: 0.28             # ...to this far ahead; a tag fits the 0.5 m view inside these (m)

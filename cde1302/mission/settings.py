@@ -64,6 +64,8 @@ class Network:
     connect_timeout_s: float = 30.0
     pose_history_s: float = 30.0
     pose_lookup_tolerance_s: float = 0.25
+    mavlink_bridge_port: int = 8888    # ESP32 port that forwards MAVLink to PX4 (CONFIG_MAVROS_BRIDGE_IN_PORT)
+    mavlink_listen_port: int = 14550   # laptop port the ESP32 forwards PX4's MAVLink to (..._OUT_PORT)
 
 
 @dataclass(frozen=True)
@@ -101,6 +103,8 @@ class Safety:
     stale_timeout_s: float = 3.0
     geofence_margin_m: float = 0.5
     mission_time_limit_s: float = 600.0
+    require_gyro_cal: bool = False     # refuse `takeoff` until a `calibrate` succeeded
+    gyro_cal_timeout_s: float = 30.0   # give up on a calibration after this (s)
 
 
 @dataclass(frozen=True)
@@ -162,6 +166,7 @@ class Sim:
     pose_noise_m: float = 0.0
     sighting_noise_m: float = 0.03
     latency_s: float = 0.13
+    gyro_cal_s: float = 2.0            # fake gyro calibration time (s)
     view_half_width_m: float = 0.40
     view_min_m: float = -0.35
     view_max_m: float = 0.28
@@ -374,11 +379,12 @@ def validate(s: Settings) -> None:
            f"sweep.lanes_along must be 'x' or 'y' (got {s.sweep.lanes_along!r})")
 
     n = s.network
-    for name in ("telem_port", "cmd_port", "camera_port"):
+    for name in ("telem_port", "cmd_port", "camera_port", "mavlink_bridge_port",
+                 "mavlink_listen_port"):
         port = getattr(n, name)
         _check(1 <= port <= 65535, f"network.{name} must be 1-65535 (got {port})")
-    _check(len({n.telem_port, n.camera_port}) == 2,
-           "network.telem_port and network.camera_port must differ")
+    _check(len({n.telem_port, n.camera_port, n.mavlink_listen_port}) == 3,
+           "network.telem_port, camera_port and mavlink_listen_port must all differ")
     _positive(n, "network", "connect_timeout_s", "pose_history_s")
     _non_negative(n, "network", "pose_lookup_tolerance_s")
 
@@ -407,7 +413,8 @@ def validate(s: Settings) -> None:
                f"flight.cruise_speed_mps ({f.cruise_speed_mps}) must be <= "
                f"flight.traj_max_speed_mps ({f.traj_max_speed_mps})")
 
-    _positive(s.safety, "safety", "stale_timeout_s", "mission_time_limit_s")
+    _positive(s.safety, "safety", "stale_timeout_s", "mission_time_limit_s",
+              "gyro_cal_timeout_s")
     _non_negative(s.safety, "safety", "geofence_margin_m")
 
     c = s.camera
@@ -439,7 +446,8 @@ def validate(s: Settings) -> None:
     m = s.sim
     _positive(m, "sim", "speed", "view_half_width_m", "climb_rate_mps",
               "yaw_rate_deg_s", "camera_fps")
-    _non_negative(m, "sim", "pose_noise_m", "sighting_noise_m", "latency_s", "arm_delay_s")
+    _non_negative(m, "sim", "pose_noise_m", "sighting_noise_m", "latency_s", "arm_delay_s",
+                  "gyro_cal_s")
     for name in ("command_loss", "false_positive_rate"):
         v = getattr(m, name)
         _check(0.0 <= v <= 1.0, f"sim.{name} must be between 0 and 1 (got {v})")
