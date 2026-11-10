@@ -22,7 +22,7 @@ flexible. The redesign is in `mechanical/`; its source repo is
 | `README.md` | Short intro: mission, system + control block diagrams, links to subsystems | ours |
 | `cde1302/main/` | ESP32-S3 firmware (ESP-IDF, FreeRTOS) | course template (`esp-everything-qgc-bridge`), modified by us |
 | `cde1302/laptop/` | Course laptop tools: `comms.py`, `protocol.py`, `camera_stream.py`, `apriltag_host.py`, lab scripts | course. **Treat as read-only.** The mission imports it via `mission/laptop_path.py` |
-| `cde1302/mission/` | **Our mission code**: `mission.py` (state machine), `planner.py`, `trajectory.py`, `tag_pipeline.py`, `tag_map.py`, `live_map.py`, `sim.py`, `config.yaml`, tests, `tools/` | ours |
+| `cde1302/mission/` | **Our mission code**: `mission.py` (state machine), `planner.py`, `trajectory.py`, `tag_pipeline.py`, `tag_map.py`, `localisation.py`, `live_map.py`, `sim.py`, `config.yaml`, tests, `tools/` | ours |
 | `cde1302/mission/logs/` | Per-run flight logs (gitignored; copy runs worth keeping elsewhere) | generated |
 | `cde1302/trajectory/`, `cde1302/waypoints/` | Lab 5 trajectory / waypoint material | course |
 | `cde1302/components/`, `managed_components/` | Vendored MAVLink, esp-apriltag, VL53L5CX, esp32-camera | third-party, don't edit |
@@ -57,9 +57,14 @@ code exists in `uwb_*` files, `uwb.send_to_px4` should stay `false`) and the
    `ABORT_LANDING` from any airborne state on geofence, stale link or time limit.
 2. `planner.py` builds lawnmower waypoints. `trajectory.py` turns them into a
    constant-speed trajectory, uploaded with `CMD_TRAJ_DATA` + `CMD_TRAJ_START`.
-3. ESP32 `traj_gate.c` keeps the setpoint `CONFIG_TRAJ_LOOKAHEAD_CM` (25 cm)
-   ahead of the drone along the path. It stops at each corner until within
-   `CONFIG_TRAJ_CORNER_CM`. `mavlink_task.c` sends
+3. ESP32 `traj_gate.c` places the setpoint along the path. Three modes
+   (menuconfig): **follow** (`CONFIG_TRAJ_FEEDFORWARD`, the default on
+   `feature/loc-tags`): target just ahead of the drone's progress plus velocity
+   feedforward at the planned speed, ramped at `CONFIG_TRAJ_ACCEL_CMS2` around
+   corners; **carrot**: target `CONFIG_TRAJ_LOOKAHEAD_CM` ahead, speed = gain x
+   gap; **waypoints** (`CONFIG_TRAJ_WAYPOINTS`): target = next lane end, which
+   barely corrects sideways error under PX4's speed cap. Each corner is held
+   until within `CONFIG_TRAJ_CORNER_CM`. `mavlink_task.c` sends
    `SET_POSITION_TARGET_LOCAL_NED` to PX4 at 20 Hz. The heading never changes.
 4. The camera stream (`camera_stream.c`) embeds the PX4 pose at capture time
    in a JPEG COM segment (`pose_hist.c`, parsed by `mission/frame_pose.py`).
@@ -68,8 +73,14 @@ code exists in `uwb_*` files, `uwb.send_to_px4` should stay `false`) and the
    camera → body (`camera_mount.py`) → NED, giving a `Sighting`.
 6. `tag_map.py` clusters sightings per ID (densest seed, median, outlier
    reject). A tag is confirmed after `min_sightings` sightings.
+   Localisation tags (27, 28 far end, 29 home; `localisation` in
+   `config.yaml`) skip the tag map and go to `localisation.py`. The home tag
+   sets the landing spot and drives precision landing. At the report, every
+   visit to them fits one PX4 → arena transform that corrects the reported
+   tags. It is never sent to PX4.
 7. `mission_log.py` writes `mission/logs/<YYYYmmdd_HHMMSS>/`: `events.csv`,
-   `trajectory.csv` (reconstructed route), `detections.csv`, `tags_final.csv`,
+   `trajectory.csv` (reconstructed route), `detections.csv`, `tags_final.csv`
+   (raw PX4 frame), `tags_corrected.csv` + `localisation.csv` (arena frame),
    `config_used.yaml`, and `map.png` (from `--map`).
 
 ## Conventions
@@ -114,9 +125,16 @@ Flashing (PowerShell, **separate window**, because it swaps that window's Python
 | `claude-one-shot` | Main development line for the mission (trajectory sweep, frame-pose tagging) |
 | `camera-fps` | Split off `claude-one-shot` at `240bccd`: faster OV3660 stream, **onboard detector removed**, full-resolution laptop detection. Not merged |
 | `docs/restructure` | This documentation restructure, based on `claude-one-shot` |
+| `feature/loc-tags` | Off `docs/restructure`: localisation tags 27-29 (drift-corrected report, precision landing), full tag16h5 table 0-29 |
 | `uwb-testing`, `nikidudu`, `yaw_test_lab5` | Older experiments |
 
 ## Gotchas
+
+- On `feature/loc-tags`, the vendored `components/esp-apriltag/apriltag/tag16h5.c`
+  was deliberately edited: the course shipped it truncated to IDs 0-21, and IDs
+  22-29 were restored for the localisation tags (with `EXPECTED_NCODES = 30` in
+  `laptop/apriltag_host.py`). The laptop detector rebuilds itself; it needs
+  the conda env's MinGW-w64 gcc on PATH, because an old `C:\MinGW` gcc fails.
 
 - `cde1302/CLAUDE.md` and parts of `cde1302/README.md` come from the upstream
   course template. They describe a SAFMC swarm, onboard detection and ToF

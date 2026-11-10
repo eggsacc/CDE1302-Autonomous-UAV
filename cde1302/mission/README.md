@@ -8,9 +8,11 @@ Wi-Fi. UWB can be added to stop the position drifting.
 
 | Part | Status |
 |---|---|
-| Sweep with the lookahead target | **Flown and working.** Steady speed, fixed heading, accurate corners and return home |
+| Sweep with the lookahead target | **Flown and working.** Steady speed, fixed heading, accurate corners and return home. A bit jerky: it slows into every corner and surges after |
+| Sweep in follow mode (velocity feedforward) | **Built and tested on the laptop, not flown yet.** Now the firmware default |
 | UWB sent to PX4 | **Flown and working**, but in some flights the drone pulled sideways at the far end of the area |
 | Fix for that sideways pull (continuous UWB) | **Built, not flown yet** |
+| Localisation tags: drift correction of the report + precision landing | **Built and tested in the simulator, not flown yet** |
 
 The fallback without the lookahead target is commit `cd06102`: reliable, but
 slow and stop-go.
@@ -134,7 +136,54 @@ Other ways to run it:
 
 Each flight is saved in `mission/logs/<date>_<time>/`.
 
-## 5. Flying with UWB
+## 5. Localisation tags
+
+Three extra tag16h5 tags at measured spots on the floor give the drone's
+drifting PX4 frame something fixed to compare against. They use the last IDs
+of the family, so they never clash with the course's tags from the front:
+
+| ID | Where | Used for |
+|---|---|---|
+| **29** | Centre of the start box. Put the drone on it, facing along the search length | Landing spot, drift fix at start and end |
+| **27** | Near the far end of the search length, `y_min` side, inside the area | Drift fix |
+| **28** | Near the far end of the search length, `y_max` side, inside the area | Drift fix |
+
+Print them at the same 120 mm black-square size as the course tags, from the
+full tag16h5 family (the course sheet only goes up to 21).
+
+**Before the flight**, measure 27 and 28 on the tiles relative to the centre of
+29 (x along the search length, y to the right) and write them in
+`localisation.tags` in `config.yaml`. 29 stays at (0, 0).
+
+**What happens:**
+
+- **Takeoff:** the home tag seen while climbing and hovering becomes the
+  landing spot (`HOME_TAG` event), instead of wherever the drone was put down.
+- **Landing:** back over home, if the home tag is now more than
+  `flight.land_radius_m` from the landing spot (drift during the flight), the
+  drone is moved over it before landing (`LAND_TARGET`, at most
+  `land_max_corrections` times). If the tag isn't in view it lands as before.
+- **Report:** each time a localisation tag was in view is a *visit*. Every
+  visit gives one "PX4 says here, really there" pair. One transform
+  (turn + scale + shift) is fitted to all of them and applied to the found
+  tags. The terminal shows a second table, `CORRECTED TAG REPORT`, and the run
+  folder gets `tags_corrected.csv` and `localisation.csv` (each visit and its
+  residual). `tags_final.csv` stays in the raw PX4 frame.
+
+This never goes to PX4: the drone flies the same way, apart from the small
+move over the home tag before landing. Turn off with `localisation.enabled: false`.
+
+If the tag positions were measured wrong, fix `config.yaml` and redo the
+correction from the log:
+
+```bash
+python mission/tools/relocalise.py mission/logs/<run> --config mission/config.yaml --write
+```
+
+Try it in the simulator by setting `sim.drift_scale`, `drift_rot_deg`,
+`drift_x_mps` and `drift_y_mps` (for example 0.05, 3, 0.0004, -0.0004).
+
+## 6. Flying with UWB
 
 **Once:** set up the anchors in NAssistant (A0 is the origin), and set the
 drone's module to role TAG, protocol NODE_FRAME2, 50 Hz, 921600 baud. The module
@@ -174,7 +223,7 @@ Carry the drone slowly in an L shape. **Reboot PX4 afterwards**
 (QGroundControl MAVLink Console: `reboot`), because `--send` moves PX4's
 position.
 
-## 6. Comparing flights with and without UWB
+## 7. Comparing flights with and without UWB
 
 With `uwb.record: true` (the default), every flight saves `uwb.csv`, even when
 UWB isn't sent to PX4. Then:
@@ -190,7 +239,7 @@ from the takeoff spot) for real tag errors.
 
 For a fair comparison, change only `uwb.send_to_px4` between flights.
 
-## 7. Settings
+## 8. Settings
 
 `mission/config.yaml` (restart `mission.py`, no reflash):
 
@@ -203,15 +252,21 @@ For a fair comparison, change only `uwb.send_to_px4` between flights.
 | `safety.stale_timeout_s` | 10 | Land if no telemetry for this long (s) |
 | `uwb.send_to_px4` | false | Send UWB to PX4 |
 | `uwb.record` | true | Save UWB readings in the flight log |
+| `localisation.tags` | 29 at (0, 0), 27 and 28 placeholders | Measured positions of the localisation tags (m) |
+| `localisation.model` | similarity | `similarity` (turn + scale + shift), `rigid` or `translation` |
+| `localisation.precision_landing` | true | Move over the home tag before landing |
 
 `idf.py menuconfig` → Drone Configuration (reflash needed):
 
 | Setting | Now | Meaning |
 |---|---|---|
-| Trajectory: target distance ahead of the drone | 25 cm | Sets the speed: about 0.24 m/s |
-| Trajectory: how close to get to each corner | 15 cm | Keep below the target distance |
+| Trajectory: fly straight from corner to corner | off | On = waypoint mode: holds the lane line badly (target is a whole lane away) |
+| Trajectory: steady speed with velocity feedforward | on | Follow mode. Speed = `flight.cruise_speed_mps` in `config.yaml` |
+| Trajectory: speed-up / slow-down rate | 30 cm/s² | Follow mode: how gently it starts and stops at corners |
+| Trajectory: target distance ahead of the drone | 25 cm | Carrot mode only (follow off): sets the speed, about 0.33 m/s |
+| Trajectory: how close to get to each corner | 5 cm | Follow mode: 5 cm. Carrot mode: keep below the target distance (was 15) |
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Problem | Fix |
 |---|---|
@@ -225,6 +280,8 @@ For a fair comparison, change only `uwb.send_to_px4` between flights.
 | Very slow | Raise `MPC_XY_VEL_MAX` and `MPC_XY_CRUISE` |
 | Pulls sideways with UWB | PX4 restarting UWB, or poor UWB coverage there. Check `cs_ev_pos` in the log, and the anchors' view of that area |
 | `uwb.mirror must be text` | Write `"yes"` with quotes |
+| `LOC_FIT_FAILED` / report not corrected | Check `localisation.csv`: a tag never seen (it must pass under a lane), or a position measured wrong (one large residual) |
+| `apriltag_host` build error `CONDITION_VARIABLE` | An old `C:\MinGW` gcc is first on PATH. `conda activate cde1302-laptop` (it has MinGW-w64 gcc), then run again |
 
 ## More documents
 
