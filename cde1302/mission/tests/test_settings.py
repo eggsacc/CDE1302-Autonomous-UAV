@@ -16,7 +16,7 @@ def raw() -> dict:
 
 
 def test_shipped_config_loads():
-    s = load_settings()
+    s = load_settings(DEFAULT_CONFIG_PATH)
     assert s.drone_id == 2
     assert s.esp_ip == "192.168.1.202"
     assert s.flight.arrival_radius_m == 0.25

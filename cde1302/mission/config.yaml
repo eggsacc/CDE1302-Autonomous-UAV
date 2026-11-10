@@ -13,13 +13,13 @@ drone_id: 2              # ESP32 CONFIG_DRONE_ID; drone IP = 192.168.1.(200 + id
 # Search area. PLACEHOLDER numbers: replace with the real area on demo day.
 area:
   x_min: 0.0             # m
-  x_max: 3.5             # m
-  y_min: -0.5             # m
+  x_max: 4.8             # m
+  y_min: -1.35             # m
   y_max: 1.0             # m
   margin: 0.0            # keep waypoints this far inside the edges (m)
 
 sweep:
-  lane_spacing: 0.5      # max distance between lanes (m); measure camera swath in the lab
+  lane_spacing: 2.5      # max distance between lanes (m); measure camera swath in the lab
   lanes_along: x         # "x" = lanes run North-South, "y" = lanes run East-West
   camera_offset_m: 0.0   # trajectory mode: drone -> middle of the camera's view on the floor (m).
                          # The heading never changes, so the whole sweep is shifted this far
@@ -147,8 +147,8 @@ localisation:                  # known tags for drift correction + precision lan
   home_tag_id: 29              # centre of the start box: precision landing + start/end drift fix
   tags:
     - {id: 29, x: 0.0, y: 0.0}   # home tag (start box centre)
-    - {id: 27, x: 3.3, y: -0.3}  # far corner, left  (y_min side), inside the search area
-    - {id: 28, x: 3.3, y: 0.8}   # far corner, right (y_max side), inside the search area
+    - {id: 27, x: 4.5, y: -1.35} # far end, under the y_min lane (the camera must pass over it)
+    - {id: 28, x: 4.5, y: 1.0}   # far end, under the y_max lane
   # Drift correction, run when the tag report is made (after the return, before
   # landing).  Never sent to the drone: it only corrects the REPORTED tag positions.
   model: similarity            # similarity (turn + scale + shift) | rigid (turn + shift) | translation

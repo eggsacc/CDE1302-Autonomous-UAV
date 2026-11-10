@@ -19,8 +19,9 @@ TICK = 0.1
 
 def configure(tmp_path, *, flight=None, safety=None, sim=None, tags=None, sweep=None,
               uwb=None, localisation=None):
-    """config.yaml with overrides.  sweep.start_at_home is off unless asked for:
-    the sim's true tags are laid out in the area exactly as config.yaml writes it."""
+    """config.yaml (with the test arena, conftest.TEST_ARENA) with overrides.
+    sweep.start_at_home is off unless asked for: the sim's true tags are laid
+    out in the area exactly as the test arena writes it."""
     s = load_settings()
     s = dataclasses.replace(s, logging=dataclasses.replace(s.logging, log_dir=str(tmp_path)))
     sweep = {"start_at_home": False, "start_in_middle": False, **(sweep or {})}
