@@ -1,0 +1,19 @@
+{
+  "passed": true,
+  "count": 12,
+  "checks": [
+    "initial state is incomplete takeoff",
+    "pinned team rectangle alternates lanes in order",
+    "unresolved assessment geometry is refused",
+    "0.151 m waits and 0.149 m accepts the 0.15 m gate",
+    "same-time evaluations do not advance; next tick hands off",
+    "fixed yaw with zero v/a/rate feedforward",
+    "return preserves displaced home and NED altitude",
+    "all stages complete with a declared ideal follower",
+    "horizontal and vertical reference slew bounds at every tick",
+    "bounded reference reaches every planned corner",
+    "timeout is failure",
+    "production route transform with 90-degree rotation and displaced origin"
+  ],
+  "scope": "Mission logic only; not Simulink plant performance"
+}

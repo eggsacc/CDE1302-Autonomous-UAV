@@ -1,0 +1,258 @@
+{
+  "execution": {
+    "matlab": "26.1.0.3346908 (R2026a) Update 5",
+    "simulationTimestamp": "11-Nov-2026 04:05:51",
+    "postprocessTimestamp": "11-Nov-2026 04:28:55",
+    "timestamp": "11-Nov-2026 04:05:51"
+  },
+  "provenance": {
+    "lecturerCommit": "9d80ddab01b20b01a19cb849b5af5424ca0ae07a",
+    "teamCommit": "e7a231eff2f9239ff0d6948a058cab19b4b5757c",
+    "model": "Lecturer RPT with unchanged vehicle/controller parameters",
+    "feedback": "Ideal plant position, velocity, attitude and body rates",
+    "guidanceMode": "bounded_position",
+    "landing": "Descent/endpoint tracking only; no contact, disarm or PX4 land mode"
+  },
+  "geometry": {
+    "officialResolved": false,
+    "label": "ASSUMED DEMO GEOMETRY; OFFICIAL OFFSETS UNVERIFIED",
+    "outerBounds": [
+      [
+        0,
+        5.4
+      ],
+      [
+        0,
+        4.5
+      ]
+    ],
+    "searchBounds": [
+      [
+        1.2,
+        4.8
+      ],
+      [
+        0.45,
+        4.05
+      ]
+    ],
+    "startBounds": [
+      [
+        0.15,
+        1.05
+      ],
+      [
+        0.15,
+        1.05
+      ]
+    ],
+    "boundaryComplianceApplicable": true
+  },
+  "metrics": {
+    "geometryLabel": "ASSUMED DEMO GEOMETRY; OFFICIAL OFFSETS UNVERIFIED",
+    "controller": "Lecturer RPT simulation; not PX4 firmware or EKF2",
+    "feedback": "Ideal feedback equals simulated truth; no sensor estimator",
+    "interpretation": "Setpoint error differs from route distance. No contact, motor shutdown or touchdown model.",
+    "durationS": 256.25,
+    "sampleCount": 256251,
+    "maxOutputStepS": 0.0010000000000331966,
+    "rmsSetpointErrorXYM": 0.040634889093082861,
+    "maxSetpointErrorXYM": 0.14161887767858591,
+    "rmsSetpointError3DM": 0.041894640676560471,
+    "maxSetpointError3DM": 0.14161909709856177,
+    "meanSetpointErrorNedM": [
+      4.0283288176550409E-6,
+      4.96392083990817E-6,
+      -0.00075543337942957632
+    ],
+    "rmsNearestRouteDistanceM": 0.023338130400311744,
+    "maxNearestRouteDistanceM": 0.073643083579963811,
+    "rmsYawErrorDeg": 0.0024879546166780482,
+    "maxAbsYawErrorDeg": 0.02282905720382182,
+    "maxTiltDeg": 3.0230808704432484,
+    "minimumHorizontalNoseProjection": 0.99873617330397135,
+    "yawInterpretation": "Euler yaw; inspect tilt and near-vertical nose projection before attributing heading excursions to independent yaw drift.",
+    "rmsHeightTrackingErrorM": 0.010196406514599642,
+    "minimumHeightM": -0.039829680075614361,
+    "maximumHeightM": 0.56098020875567012,
+    "meanSpeedXYMps": 0.13969458463187728,
+    "maxSpeedXYMps": 0.18115124723057122,
+    "maxSpeed3DMps": 0.1811512641006128,
+    "horizontalDistanceFlownM": 35.796737311918548,
+    "maxGroundPlanePenetrationM": 0.039829680075614361,
+    "minTrueCentreBoundaryMarginM": 0.39814869929669605,
+    "minCommandCentreBoundaryMarginM": 0.45,
+    "initialPositionErrorFromHomeM": 0,
+    "initialSpeedMps": 0,
+    "initialYawErrorDeg": 0,
+    "stages": {
+      "TAKEOFF": {
+        "sampleCount": 3250,
+        "durationS": 3.25,
+        "rmsSetpointErrorXYM": 0,
+        "maxSetpointErrorXYM": 0,
+        "rmsSetpointError3DM": 0.035107419001537396,
+        "rmsActiveLegDistanceM": null,
+        "maxActiveLegDistanceM": null,
+        "rmsHeightTrackingErrorM": 0.035107419001537396,
+        "rmsYawErrorDeg": 0,
+        "meanSpeedXYMps": 0
+      },
+      "HOVER": {
+        "sampleCount": 4800,
+        "durationS": 4.8000000000000007,
+        "rmsSetpointErrorXYM": 0,
+        "maxSetpointErrorXYM": 0,
+        "rmsSetpointError3DM": 0.045336144164814685,
+        "rmsActiveLegDistanceM": null,
+        "maxActiveLegDistanceM": null,
+        "rmsHeightTrackingErrorM": 0.045336144164814685,
+        "rmsYawErrorDeg": 0,
+        "meanSpeedXYMps": 0
+      },
+      "SWEEP": {
+        "sampleCount": 196850,
+        "durationS": 196.85000000000002,
+        "rmsSetpointErrorXYM": 0.042639727172963125,
+        "maxSetpointErrorXYM": 0.11245278746003755,
+        "rmsSetpointError3DM": 0.042702487452246939,
+        "rmsActiveLegDistanceM": 0.0248377092922738,
+        "maxActiveLegDistanceM": 0.073356004962773724,
+        "rmsHeightTrackingErrorM": 0.0023143252201402041,
+        "rmsYawErrorDeg": 0.0027276154729490528,
+        "meanSpeedXYMps": 0.15304889919538087
+      },
+      "RETURN": {
+        "sampleCount": 35250,
+        "durationS": 35.25,
+        "rmsSetpointErrorXYM": 0.037993976713153285,
+        "maxSetpointErrorXYM": 0.14161887767858591,
+        "rmsSetpointError3DM": 0.037994030377543474,
+        "rmsActiveLegDistanceM": 0.013485249927369089,
+        "maxActiveLegDistanceM": 0.056170014583932948,
+        "rmsHeightTrackingErrorM": 6.3858046195230052E-5,
+        "rmsYawErrorDeg": 0.0016727025291071165,
+        "meanSpeedXYMps": 0.15256640053029943
+      },
+      "HOME_SETTLE": {
+        "sampleCount": 4750,
+        "durationS": 4.75,
+        "rmsSetpointErrorXYM": 0.051164496975136822,
+        "maxSetpointErrorXYM": 0.073643083579963811,
+        "rmsSetpointError3DM": 0.051164514959055052,
+        "rmsActiveLegDistanceM": null,
+        "maxActiveLegDistanceM": null,
+        "rmsHeightTrackingErrorM": 4.2898444969363312E-5,
+        "rmsYawErrorDeg": 0.0022005738271419842,
+        "meanSpeedXYMps": 0.053920247247223892
+      },
+      "DESCEND": {
+        "sampleCount": 5000,
+        "durationS": 5,
+        "rmsSetpointErrorXYM": 0.019171253503530373,
+        "maxSetpointErrorXYM": 0.035796267032997986,
+        "rmsSetpointError3DM": 0.042580250964470247,
+        "rmsActiveLegDistanceM": null,
+        "maxActiveLegDistanceM": null,
+        "rmsHeightTrackingErrorM": 0.038020268427519592,
+        "rmsYawErrorDeg": 4.647697845580239E-5,
+        "meanSpeedXYMps": 0.0058358372386837273
+      },
+      "ENDPOINT_HOLD": {
+        "sampleCount": 6350,
+        "durationS": 6.3499999999999943,
+        "rmsSetpointErrorXYM": 0.0031735670040158388,
+        "maxSetpointErrorXYM": 0.0066206870776333712,
+        "rmsSetpointError3DM": 0.026783529379145351,
+        "rmsActiveLegDistanceM": null,
+        "maxActiveLegDistanceM": null,
+        "rmsHeightTrackingErrorM": 0.026594847592617724,
+        "rmsYawErrorDeg": 2.5226617045330984E-6,
+        "meanSpeedXYMps": 0.00092089352932017655
+      },
+      "DONE": {
+        "sampleCount": 1,
+        "durationS": 0,
+        "rmsSetpointErrorXYM": null,
+        "maxSetpointErrorXYM": 0.00077367260753450435,
+        "rmsSetpointError3DM": null,
+        "rmsActiveLegDistanceM": null,
+        "maxActiveLegDistanceM": null,
+        "rmsHeightTrackingErrorM": null,
+        "rmsYawErrorDeg": null,
+        "meanSpeedXYMps": null
+      },
+      "FAILED": {
+        "sampleCount": 0,
+        "durationS": 0,
+        "rmsSetpointErrorXYM": null,
+        "maxSetpointErrorXYM": null,
+        "rmsSetpointError3DM": null,
+        "rmsActiveLegDistanceM": null,
+        "maxActiveLegDistanceM": null,
+        "rmsHeightTrackingErrorM": null,
+        "rmsYawErrorDeg": null,
+        "meanSpeedXYMps": null
+      }
+    },
+    "returnHold": {
+      "available": true,
+      "lastTimeS": 244.899,
+      "horizontalErrorM": 0.035808216642877942,
+      "horizontalSpeedMps": 0.011951517311950478,
+      "settleSatisfied": true,
+      "settleTimedOut": false,
+      "exitReason": "Stable return gate"
+    },
+    "endpoint": {
+      "timeS": 256.25,
+      "horizontalErrorFromHomeM": 0.00077367260753450435,
+      "positionErrorFromHome3DM": 0.010119783862207462,
+      "heightM": -0.01009016630755635,
+      "verticalSpeedDownMps": -0.0034344468306401819,
+      "horizontalSpeedMps": 0.00026155842100992094,
+      "speed3DMps": 0.0034443922308726098,
+      "insideConfiguredStartZone": true,
+      "interpretation": "Descent endpoint only; not physical touchdown or PX4 autonomous landing"
+    }
+  },
+  "checks": {
+    "numericalToleranceM": 1E-8,
+    "integrity": {
+      "finiteStateAndReference": true,
+      "finiteRequiredDiagnostics": true,
+      "strictlyIncreasingTime": true,
+      "initialPositionMatchesHome": true
+    },
+    "reference": {
+      "zeroVelocityAccelerationFeedforward": true,
+      "fixedYaw": true,
+      "zeroYawRateFeedforward": true,
+      "heightWithinConfiguredRange": true
+    },
+    "geometry": {
+      "boundaryCheckApplicable": true,
+      "commandCentreInsideOuterBoundary": true,
+      "trueCentreInsideOuterBoundary": true,
+      "endpointInsideConfiguredStartZone": true,
+      "noGroundPlanePenetration": false
+    },
+    "mission": {
+      "completed": true,
+      "failed": false,
+      "stoppedBeforeCompletion": false,
+      "finalStageCode": 8,
+      "returnHoldObserved": true,
+      "returnSettleSatisfied": true,
+      "returnSettleTimedOut": false,
+      "endpointWithinConfiguredPositionGate": true
+    },
+    "scope": {
+      "trackingPassThresholdSpecified": false,
+      "groundContactModelImplemented": false,
+      "officialGeometryVerified": false,
+      "physicalFlightOrPx4Validated": false,
+      "note": "Scope fields describe limitations, not failed software tests. Boundary checks concern centre position, not rotor clearance."
+    }
+  }
+}

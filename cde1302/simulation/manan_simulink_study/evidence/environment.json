@@ -1,0 +1,237 @@
+{
+  "checked_at_utc": "2026-11-10T19:55:01Z",
+  "matlab_version": "26.1.0.3346908 (R2026a) Update 5",
+  "matlab_release": "2026a",
+  "computer": "PCWIN64",
+  "matlab_root": "C:\\Program Files\\MATLAB\\R2026a",
+  "jvm_available": true,
+  "installed_products": [
+    {
+      "Name": "Aerospace Blockset",
+      "Version": "26.1",
+      "Release": "(R2026a)",
+      "Date": "20-Nov-2025"
+    },
+    {
+      "Name": "Aerospace Toolbox",
+      "Version": "26.1",
+      "Release": "(R2026a)",
+      "Date": "20-Nov-2025"
+    },
+    {
+      "Name": "DSP System Toolbox",
+      "Version": "26.1",
+      "Release": "(R2026a)",
+      "Date": "20-Nov-2025"
+    },
+    {
+      "Name": "MATLAB",
+      "Version": "26.1",
+      "Release": "(R2026a)",
+      "Date": "19-Nov-2025"
+    },
+    {
+      "Name": "Optimization Toolbox",
+      "Version": "26.1",
+      "Release": "(R2026a)",
+      "Date": "20-Nov-2025"
+    },
+    {
+      "Name": "Phased Array System Toolbox",
+      "Version": "26.1",
+      "Release": "(R2026a)",
+      "Date": "19-Dec-2025"
+    },
+    {
+      "Name": "RF PCB Toolbox",
+      "Version": "26.1",
+      "Release": "(R2026a)",
+      "Date": "20-Nov-2025"
+    },
+    {
+      "Name": "RF Toolbox",
+      "Version": "26.1",
+      "Release": "(R2026a)",
+      "Date": "20-Nov-2025"
+    },
+    {
+      "Name": "Robotics System Toolbox",
+      "Version": "26.1",
+      "Release": "(R2026a)",
+      "Date": "20-Nov-2025"
+    },
+    {
+      "Name": "Signal Processing Toolbox",
+      "Version": "26.1",
+      "Release": "(R2026a)",
+      "Date": "20-Nov-2025"
+    },
+    {
+      "Name": "Simulink",
+      "Version": "26.1",
+      "Release": "(R2026a)",
+      "Date": "20-Nov-2025"
+    }
+  ],
+  "license_test_limitation": "Licence existence does not prove a model compiles or reserve a network seat.",
+  "products": [
+    {
+      "product": "Simulink",
+      "feature": "Simulink",
+      "essential": true,
+      "installed": true,
+      "license_exists": true,
+      "error": ""
+    },
+    {
+      "product": "Aerospace Blockset",
+      "feature": "Aerospace_Blockset",
+      "essential": true,
+      "installed": true,
+      "license_exists": true,
+      "error": ""
+    },
+    {
+      "product": "Aerospace Toolbox",
+      "feature": "Aerospace_Toolbox",
+      "essential": true,
+      "installed": true,
+      "license_exists": true,
+      "error": ""
+    },
+    {
+      "product": "Robotics System Toolbox",
+      "feature": "Robotics_System_Toolbox",
+      "essential": false,
+      "installed": true,
+      "license_exists": true,
+      "error": ""
+    },
+    {
+      "product": "Optimization Toolbox",
+      "feature": "Optimization_Toolbox",
+      "essential": false,
+      "installed": true,
+      "license_exists": true,
+      "error": ""
+    }
+  ],
+  "functions": [
+    {
+      "name": "sim",
+      "essential": true,
+      "selected_provider": "built-in (C:\\Program Files\\MATLAB\\R2026a\\toolbox\\simulink\\engine\\mi\\sim)",
+      "all_providers": [
+        "built-in (C:\\Program Files\\MATLAB\\R2026a\\toolbox\\simulink\\engine\\mi\\sim)"
+      ]
+    },
+    {
+      "name": "load_system",
+      "essential": true,
+      "selected_provider": "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\simulink\\slx\\m\\load_system.m",
+      "all_providers": [
+        "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\simulink\\slx\\m\\load_system.m"
+      ]
+    },
+    {
+      "name": "new_system",
+      "essential": true,
+      "selected_provider": "built-in (C:\\Program Files\\MATLAB\\R2026a\\toolbox\\simulink\\core\\api\\new_system)",
+      "all_providers": [
+        "built-in (C:\\Program Files\\MATLAB\\R2026a\\toolbox\\simulink\\core\\api\\new_system)"
+      ]
+    },
+    {
+      "name": "set_param",
+      "essential": true,
+      "selected_provider": "built-in (C:\\Program Files\\MATLAB\\R2026a\\toolbox\\simulink\\engine\\mi\\set_param)",
+      "all_providers": [
+        "built-in (C:\\Program Files\\MATLAB\\R2026a\\toolbox\\simulink\\engine\\mi\\set_param)"
+      ]
+    },
+    {
+      "name": "Simulink.SimulationInput",
+      "essential": true,
+      "selected_provider": "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\simulink\\simulationinput\\+Simulink\\SimulationInput.p",
+      "all_providers": [
+        "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\simulink\\simulationinput\\+Simulink\\SimulationInput.p"
+      ]
+    },
+    {
+      "name": "quatmultiply",
+      "essential": true,
+      "selected_provider": "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\aero\\aero\\quatmultiply.m",
+      "all_providers": [
+        "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\aero\\aero\\quatmultiply.m"
+      ]
+    },
+    {
+      "name": "quatinv",
+      "essential": true,
+      "selected_provider": "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\aero\\aero\\quatinv.m",
+      "all_providers": [
+        "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\aero\\aero\\quatinv.m"
+      ]
+    },
+    {
+      "name": "quatnormalize",
+      "essential": true,
+      "selected_provider": "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\aero\\aero\\quatnormalize.m",
+      "all_providers": [
+        "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\aero\\aero\\quatnormalize.m"
+      ]
+    },
+    {
+      "name": "quat2rotm",
+      "essential": true,
+      "selected_provider": "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\shared\\robotics\\robotutils\\quat2rotm.m",
+      "all_providers": [
+        "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\shared\\robotics\\robotutils\\quat2rotm.m"
+      ]
+    },
+    {
+      "name": "rotm2quat",
+      "essential": true,
+      "selected_provider": "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\shared\\robotics\\robotutils\\rotm2quat.m",
+      "all_providers": [
+        "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\shared\\robotics\\robotutils\\rotm2quat.m"
+      ]
+    },
+    {
+      "name": "rotm2eul",
+      "essential": true,
+      "selected_provider": "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\shared\\robotics\\robotutils\\rotm2eul.m",
+      "all_providers": [
+        "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\shared\\robotics\\robotutils\\rotm2eul.m"
+      ]
+    },
+    {
+      "name": "quadprog",
+      "essential": false,
+      "selected_provider": "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\optim\\optim\\quadprog.m",
+      "all_providers": [
+        "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\optim\\optim\\quadprog.m"
+      ]
+    },
+    {
+      "name": "eul2rotm",
+      "essential": false,
+      "selected_provider": "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\shared\\robotics\\robotutils\\eul2rotm.m",
+      "all_providers": [
+        "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\shared\\robotics\\robotutils\\eul2rotm.m"
+      ]
+    },
+    {
+      "name": "uifigure",
+      "essential": false,
+      "selected_provider": "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\matlab\\uitools\\uicomponents\\components\\uifigure.m",
+      "all_providers": [
+        "C:\\Program Files\\MATLAB\\R2026a\\toolbox\\matlab\\uitools\\uicomponents\\components\\uifigure.m"
+      ]
+    }
+  ],
+  "optional_toolbox_note": "Optimization is optional minimum snap; actual execution verifies rotation-function licensing.",
+  "prerequisites_passed": true,
+  "failures": [],
+  "simulation_executed_by_this_check": false
+}

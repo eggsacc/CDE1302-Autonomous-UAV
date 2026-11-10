@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "checks": [
+    "0.1 m independent tracking offset",
+    "0.1 m active-leg distance",
+    "1 m integrated horizontal travel",
+    "2 pi yaw equals zero heading",
+    "missing return is unavailable",
+    "stop time does not imply completion"
+  ],
+  "count": 6,
+  "scope": "Synthetic arithmetic fixture, not a Simulink or flight run"
+}

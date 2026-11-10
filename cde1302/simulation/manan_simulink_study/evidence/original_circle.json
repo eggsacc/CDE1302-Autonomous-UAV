@@ -1,0 +1,27 @@
+{
+  "executed": true,
+  "matlab": "26.1.0.3346908 (R2026a) Update 5",
+  "lecturerCommit": "9d80ddab01b20b01a19cb849b5af5424ca0ae07a",
+  "originalScriptUnchanged": true,
+  "batchUiAdaptation": false,
+  "flightGearEnabled": true,
+  "durationS": 15,
+  "samples": 15001,
+  "positionFinite": true,
+  "rmse3dM": 0.3835822180514889,
+  "after5sRmse3dM": 0.064704983660451,
+  "max3dErrorM": 2.1447797088701703,
+  "final3dErrorM": 0.011930830524256785,
+  "finalPositionNedM": [
+    -0.30497949961773191,
+    0.93543490890679559,
+    0.0039040574926554861
+  ],
+  "minimumReferenceYawRateRadS": -627.518530717958,
+  "limitations": [
+    "Not PX4",
+    "Initial reference is 2 m from initial vehicle",
+    "Original yaw wrapping defect retained",
+    "No takeoff, return or physical landing"
+  ]
+}
