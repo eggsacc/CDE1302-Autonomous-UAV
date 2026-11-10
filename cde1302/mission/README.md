@@ -315,11 +315,11 @@ For a fair comparison, change only `uwb.send_to_px4` between flights.
 
 | Setting | Now | Meaning |
 |---|---|---|
-| Trajectory: fly straight from corner to corner | off | On = waypoint mode: holds the lane line badly (target is a whole lane away) |
-| Trajectory: steady speed with velocity feedforward | on | Follow mode. Speed = `flight.cruise_speed_mps` in `config.yaml` |
-| Trajectory: speed-up / slow-down rate | 30 cm/s² | Follow mode: how gently it starts and stops at corners |
+| Trajectory: fly straight from corner to corner | **on** (branch `feature/loc-tags-waypoints`, for comparison) | Waypoint mode: the target is the next lane end; PX4 flies at up to `MPC_XY_VEL_MAX`. Holds the lane line less tightly. `feature/loc-tags` has it off (follow mode) |
+| Trajectory: steady speed with velocity feedforward | (hidden: waypoint mode is on) | Follow mode. Speed = `flight.cruise_speed_mps` in `config.yaml` |
+| Trajectory: speed-up / slow-down rate | (hidden) | Follow mode: how gently it starts and stops at corners |
 | Trajectory: target distance ahead of the drone | 25 cm | Carrot mode only (follow off): sets the speed, about 0.33 m/s |
-| Trajectory: how close to get to each corner | 5 cm | Follow mode: 5 cm. Carrot mode: keep below the target distance (was 15) |
+| Trajectory: how close to get to each corner | 15 cm | Waypoint radius, as on `claude-one-shot`. Follow mode used 5 cm |
 
 ## 9. Troubleshooting
 

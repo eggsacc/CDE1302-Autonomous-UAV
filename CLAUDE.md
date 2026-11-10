@@ -126,6 +126,7 @@ Flashing (PowerShell, **separate window**, because it swaps that window's Python
 | `camera-fps` | Split off `claude-one-shot` at `240bccd`: faster OV3660 stream, **onboard detector removed**, full-resolution laptop detection. Not merged |
 | `docs/restructure` | This documentation restructure, based on `claude-one-shot` |
 | `feature/loc-tags` | Off `docs/restructure`: localisation tags 27-29 (drift-corrected report, precision landing), full tag16h5 table 0-29 |
+| `feature/loc-tags-waypoints` | `feature/loc-tags` with the firmware back on waypoint mode (`CONFIG_TRAJ_WAYPOINTS`, 15 cm corners), to compare against follow mode |
 | `uwb-testing`, `nikidudu`, `yaw_test_lab5` | Older experiments |
 
 ## Gotchas
