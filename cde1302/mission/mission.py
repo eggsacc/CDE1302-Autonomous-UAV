@@ -49,6 +49,12 @@ With uwb.send_to_px4, UWB/PX4 position pairs are collected during the sweep
 (uwb_feed.py).  Once they give a good alignment it is sent to the drone, which
 feeds PX4 from then on.  A sweep with no alignment simply flies on without UWB.
 
+With tags.home_tag_id, an AprilTag at the takeoff spot measures the optical-
+flow drift (home_tag.py): its position is recorded while hovering before the
+sweep and again back home; the difference is how far PX4's position drifted.
+The drone moves by that much until the tag is under it, then lands, and the
+search tags are corrected in proportion to the distance flown.
+
 With uwb.ground_frame (the other UWB method, from laptop/simple_uwb_frame_goal.py
 on uwb-testing) the UWB anchors ARE the coordinate system from the ground up:
 on `takeoff` the laptop first sends a rotation-only alignment (uwb.nose_deg,
@@ -77,6 +83,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Iterable, Optional
 
+import numpy as np
+
 if __package__ in (None, ""):                  # `python mission/mission.py`
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -93,6 +101,8 @@ from sighting import Sighting
 from tag_map import TagEstimate, TagMap
 from trajectory import Trajectory, build_trajectory, shift_for_camera
 from uwb_align import Alignment
+from home_tag import DistanceFlown, SightingHistory, drift_at
+from tag_map import robust_estimate
 
 log = logging.getLogger("mission")
 
@@ -193,7 +203,7 @@ class Mission:
                  tag_map: TagMap, mlog: MissionLog, *,
                  waypoints: list[tuple[float, float]], auto: bool = False,
                  echo: Optional[Callable[[str], None]] = None,
-                 uwb=None) -> None:
+                 uwb=None, history: Optional[SightingHistory] = None) -> None:
         validate_plan(waypoints, settings.area)
         self.settings = settings
         self.drone = drone
@@ -218,6 +228,15 @@ class Mission:
         self._snap_next_send = 0.0
         self._snap_err = math.inf
         self._frame_next = 0.0
+        # tags.home_tag_id: drift measured on the home tag (home_tag.py)
+        self.history = history
+        self.flown = DistanceFlown()
+        self.home_ref: Optional[tuple[float, float, float]] = None   # x, y, distance flown
+        self.home_orig: Optional[tuple[float, float]] = None
+        self.drift: Optional[tuple[float, float, float]] = None      # ex, ey, distance flown
+        self._home_check_t: Optional[float] = None
+        self._home_moves = 0
+        self._home_reason = ""
         self.waypoints = list(waypoints)
         self.auto = auto
         self.dry_run = drone.dry_run
@@ -279,6 +298,8 @@ class Mission:
         self.log.close()
 
     def _on_pose(self, p: Pose) -> None:
+        if self.phase in AIRBORNE:
+            self.flown.add(p.t, p.x, p.y)
         self.log.trajectory(p.t, p.x, p.y, p.heading, p.nav_state_name)
         self.state.add_point(p.x, p.y)
 
@@ -518,6 +539,7 @@ class Mission:
                 self.abort(f"hover not stable within {f.hover_radius_m} m")
                 return
         if self._hover_ok and (self.auto or self._start_requested):
+            self._set_home_ref(now)
             self.wp_index = 0
             self._set_phase(Phase.EXPLORING, "auto" if self.auto else "operator start")
             p = self.drone.latest_pose()
@@ -692,6 +714,9 @@ class Mission:
         self.job = self._new_traj("return home", (p.x, p.y), [self.home], now)
 
     def _tick_returning(self, now: float) -> None:
+        if self._home_check_t is not None:
+            self._tick_home_check(now)
+            return
         if self._settle_t is not None:
             self._tick_settling(now)
             return
@@ -730,13 +755,101 @@ class Mission:
         err = math.hypot(p.x - hx, p.y - hy)
         if span >= f.land_hold_s - 1e-6 and all(
                 math.hypot(x - hx, y - hy) <= f.land_radius_m for _, x, y in self._recent):
-            self._land_home(f"search complete, {err * 100:.0f} cm from home")
+            self._settled(now, f"search complete, {err * 100:.0f} cm from home")
         elif now - self._settle_t >= f.land_settle_max_s:
-            self._land_home(f"search complete, not settled within {f.land_radius_m * 100:.0f} cm "
-                            f"after {f.land_settle_max_s:.0f} s ({err * 100:.0f} cm from home)")
+            self._settled(now, f"search complete, not settled within {f.land_radius_m * 100:.0f} "
+                          f"cm after {f.land_settle_max_s:.0f} s ({err * 100:.0f} cm from home)")
+
+    def _settled(self, now: float, reason: str) -> None:
+        """Over (PX4's idea of) home: look for the home tag first, if there is one."""
+        if self.home_ref is None or self._home_moves > self.settings.tags.home_tag_max_moves:
+            self._land_home(reason)
+            return
+        self._settle_t = None
+        self._home_check_t = now
+        self._home_reason = reason
+
+    # -- tags.home_tag_id: measure the drift, land on the real home -----------
+
+    def _set_home_ref(self, now: float) -> None:
+        t = self.settings.tags
+        if t.home_tag_id < 0 or self.history is None:
+            return
+        self.home_orig = self.home
+        m = self.history.median(t.home_tag_id, self._phase_t, t.home_tag_min_sightings)
+        if m is None:
+            n = len(self.history.points(t.home_tag_id, self._phase_t))
+            self.log.event("HOME_TAG_MISSING", f"home tag {t.home_tag_id} seen {n} times while "
+                           "hovering: no drift correction this flight")
+            return
+        x, y, tm, n = m
+        self.home_ref = (x, y, self.flown.at(tm))
+        self.log.event("HOME_TAG_REF", f"tag {t.home_tag_id} at ({x:.3f}, {y:.3f}) from {n} "
+                       "sightings before the sweep")
+
+    def _tick_home_check(self, now: float) -> None:
+        t = self.settings.tags
+        m = self.history.median(t.home_tag_id, self._home_check_t, t.home_tag_min_sightings)
+        if m is None:
+            if now - self._home_check_t >= t.home_tag_wait_s:
+                self._home_check_t = None
+                self.log.event("HOME_TAG_NOT_SEEN", f"not under the drone after "
+                               f"{t.home_tag_wait_s:.0f} s: drift bigger than the camera's "
+                               "view? landing here")
+                self._land_home(self._home_reason)
+            return
+        self._home_check_t = None
+        x, y, tm, n = m
+        ex, ey = x - self.home_ref[0], y - self.home_ref[1]
+        if math.hypot(ex, ey) > t.home_tag_max_drift_m:
+            self.log.event("HOME_TAG_IGNORED", f"drift ({ex:+.2f}, {ey:+.2f}) m is more than "
+                           f"{t.home_tag_max_drift_m:.1f} m: a wrong sighting? landing here")
+            self._land_home(self._home_reason)
+            return
+        self.drift = (ex, ey, self.flown.at(tm))
+        target = (self.home_orig[0] + ex, self.home_orig[1] + ey)
+        move = math.dist(target, self.home)
+        self.log.event("HOME_TAG_DRIFT", f"PX4 drifted ({ex:+.3f}, {ey:+.3f}) m = "
+                       f"{math.hypot(ex, ey):.3f} m over {self.drift[2]:.1f} m flown "
+                       f"({n} sightings); real home is {move:.3f} m from here")
+        if move <= t.home_tag_tol_m or self._home_moves >= t.home_tag_max_moves:
+            self._land_home(f"{self._home_reason}; on the home tag within {move * 100:.0f} cm")
+            return
+        self._home_moves += 1
+        self.home = target
+        p = self.drone.latest_pose()
+        self.log.event("HOME_TAG_MOVE", f"move {self._home_moves}: to ({target[0]:.3f}, "
+                       f"{target[1]:.3f}), {move:.2f} m")
+        if self.use_trajectory:
+            self.job = self._new_traj("home tag", (p.x, p.y), [target], now)
+        else:
+            self.leg = self._new_leg("home tag", target, now)
+
+    def corrected_tags(self) -> list[tuple[TagEstimate, float, float]]:
+        """Confirmed tags with positions corrected for the measured drift:
+        (estimate, x, y).  Without a drift measurement x, y are the raw ones."""
+        tags = self.tag_map.estimates(confirmed_only=True)
+        t = self.settings.tags
+        if (self.drift is None or self.history is None or not t.home_tag_correct_tags):
+            return [(e, e.x, e.y) for e in tags]
+        d0, (ex, ey, d1) = self.home_ref[2], self.drift
+        out = []
+        for e in tags:
+            pts = []
+            for tc, x, y in self.history.points(e.tag_id):
+                cx, cy = drift_at(self.flown.at(tc), d0, d1, (ex, ey))
+                pts.append((x - cx, y - cy))
+            if not pts:
+                out.append((e, e.x, e.y))
+                continue
+            est, _, _ = robust_estimate(np.asarray(pts, dtype=float), t.confirm_radius_m,
+                                        t.outlier_radius_m)
+            out.append((e, float(est[0]), float(est[1])))
+        return out
 
     def _land_home(self, reason: str) -> None:
         self._settle_t = None
+        self._home_check_t = None
         self._report_and_land(reason)
         self._set_phase(Phase.LANDING)
 
@@ -889,28 +1002,35 @@ class Mission:
     def report(self) -> str:
         """Print and save the final tag table; returns the text."""
         now = self.drone.now()
-        tags = self.tag_map.estimates(confirmed_only=True)
+        corrected = self.corrected_tags()
+        tags = [e for e, _, _ in corrected]
         ms = self.log.mission_elapsed(now)
         lines = [f"=== TAG REPORT  {format_wall(self.log.wall_time(now))}  "
                  f"T+{(ms or 0.0):.1f} s  "
                  f"({len(tags)} confirmed; PX4 local NED, m; home "
                  f"{'(%.2f, %.2f)' % self.home if self.home else 'n/a'}) ===",
                  f"{'ID':>4} {'x':>8} {'y':>8} {'sightings':>10} {'spread':>7}  first seen"]
-        for e in tags:
+        for e, cx, cy in corrected:
             first = self.log.mission_elapsed(e.first_seen_t)
-            lines.append(f"{e.tag_id:>4} {e.x:>8.3f} {e.y:>8.3f} {e.n_inliers:>10d} "
+            lines.append(f"{e.tag_id:>4} {cx:>8.3f} {cy:>8.3f} {e.n_inliers:>10d} "
                          f"{e.spread_m:>7.3f}  T+{(first or 0.0):.1f} s "
                          f"({format_wall(self.log.wall_time(e.first_seen_t))})")
         if not tags:
             lines.append("   (no tags confirmed)")
         elif self.frame_alignment is not None:
             lines.append("In UWB coordinates (m from anchor A0, as NAssistant shows):")
-            for e in tags:
-                ux, uy = self.frame_alignment.to_uwb(e.x, e.y)
+            for e, cx, cy in corrected:
+                ux, uy = self.frame_alignment.to_uwb(cx, cy)
                 lines.append(f"{e.tag_id:>4} {ux:>8.3f} {uy:>8.3f}")
+        if self.drift is not None and tags and self.settings.tags.home_tag_correct_tags:
+            ex, ey, d1 = self.drift
+            lines.append(f"Corrected for drift ({ex:+.3f}, {ey:+.3f}) m measured on the home tag "
+                         f"after {d1:.1f} m; raw positions in tags_final.csv x_raw / y_raw.")
         text = "\n".join(lines)
         self._echo(text)
-        path = self.log.write_tags_final(self.tag_map.final_rows())
+        rows = [{**e.final_row(), "x": cx, "y": cy, "x_raw": e.x, "y_raw": e.y}
+                for e, cx, cy in corrected]
+        path = self.log.write_tags_final(rows)
         self.log.event("TAG_REPORT", f"{len(tags)} tags -> {path.name}")
         return text
 
@@ -951,9 +1071,14 @@ def build(settings: Settings, *, sim: bool = False, dry_run: bool = False,
     def on_command(name: str, details: str) -> None:
         mlog.event(name, details)
 
+    history = SightingHistory()
+    home_id = settings.tags.home_tag_id
+
     def on_sighting(s: Sighting) -> None:
         mlog.detection(s.t_detect, s.t_capture, **s.log_fields())
-        tag_map.add(s)
+        history.add(s)
+        if s.tag_id != home_id:                  # the home tag is not a search target
+            tag_map.add(s)
 
     drone: DroneInterface
     source: SightingSource
@@ -971,7 +1096,8 @@ def build(settings: Settings, *, sim: bool = False, dry_run: bool = False,
             uwb = UwbFeed(settings, on_reading=(lambda **f: mlog.uwb(mlog.now(), **f))
                           if settings.uwb.record else None)
     return Mission(settings, drone, source, tag_map, mlog,
-                   waypoints=plan_waypoints(settings), auto=auto, echo=echo, uwb=uwb)
+                   waypoints=plan_waypoints(settings), auto=auto, echo=echo, uwb=uwb,
+                   history=history)
 
 
 def run(mission: Mission, *, period_s: float,

@@ -13,13 +13,13 @@ drone_id: 2              # ESP32 CONFIG_DRONE_ID; drone IP = 192.168.1.(200 + id
 # Search area. PLACEHOLDER numbers: replace with the real area on demo day.
 area:
   x_min: 0.0             # m
-  x_max: 5.0             # m
+  x_max: 4.8             # m
   y_min: -1.35             # m
   y_max: 1.0             # m
   margin: 0.0            # keep waypoints this far inside the edges (m)
 
 sweep:
-  lane_spacing: 0.5      # max distance between lanes (m); measure camera swath in the lab
+  lane_spacing: 2.5      # max distance between lanes (m); measure camera swath in the lab
   lanes_along: x         # "x" = lanes run North-South, "y" = lanes run East-West
   camera_offset_m: 0.0   # trajectory mode: drone -> middle of the camera's view on the floor (m).
                          # The heading never changes, so the whole sweep is shifted this far
@@ -106,6 +106,14 @@ tags:
   confirm_radius_m: 0.20       # sightings this close to the median count towards confirmation (m)
   outlier_radius_m: 0.30       # sightings farther than this from the median are ignored (m)
   max_sightings_per_tag: 400   # keep at most this many (newest) sightings per id (count)
+  home_tag_id: -1              # tag on the floor at the takeoff spot, to measure optical-flow drift
+                               # (not one of the search tags). -1 = off. See HOME_TAG.md
+  home_tag_min_sightings: 5    # sightings needed for each home-tag fix (count)
+  home_tag_wait_s: 8.0         # back home: look this long for the tag, then land anyway (s)
+  home_tag_tol_m: 0.05         # land once a correction would move home less than this (m)
+  home_tag_max_moves: 3        # correction moves before landing anyway (count)
+  home_tag_max_drift_m: 1.0    # a bigger "drift" is taken as a wrong sighting and ignored (m)
+  home_tag_correct_tags: true  # also correct the search tags' positions for the drift
 
 sim:
   speed: 1.0                   # sim clock multiplier (1 = real time)

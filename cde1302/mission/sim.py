@@ -170,6 +170,14 @@ class SimDrone:
             self.advance()
             self._telem_paused = paused
 
+    def set_estimate_error(self, dx: float, dy: float) -> None:
+        """PX4's position is now off the truth by (dx, dy), like optical-flow
+        drift: telemetry and setpoints stay in PX4's frame, but the drone (and
+        so the camera) is really at estimate - error."""
+        with self._lock:
+            self.advance()
+            self._est_err = (float(dx), float(dy))
+
     def ekf_jump(self, dx: float, dy: float) -> None:
         """Shift the estimated position by (dx, dy), like an EKF reset: the drone
         and whatever it is following (hold point, trajectory) move together."""
@@ -334,7 +342,8 @@ class SimDrone:
                         self._emit_telemetry()
 
     def _record_truth(self) -> None:
-        self._truth.append(Pose(self._t, self.x, self.y, self.heading, self.nav))
+        ex, ey = getattr(self, "_est_err", (0.0, 0.0))
+        self._truth.append(Pose(self._t, self.x - ex, self.y - ey, self.heading, self.nav))
         self._alt_hist.append(Pose(self._t, self.alt, 0.0, 0.0, 0))
 
     def _emit_telemetry(self) -> None:

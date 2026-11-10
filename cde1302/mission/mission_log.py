@@ -59,7 +59,7 @@ UWB_FIELDS = ["wall_time", "run_s", "mission_s", "esp_time_s",
               "uwb_x", "uwb_y", "uwb_z", "eop_max", "fix",
               "px4_x", "px4_y", "px4_age_ms"]
 
-TAGS_FINAL_FIELDS = ["tag_id", "x", "y", "n_sightings",
+TAGS_FINAL_FIELDS = ["tag_id", "x", "y", "x_raw", "y_raw", "n_sightings",
                      "first_seen_wall_time", "first_seen_mission_s",
                      "confirmed_wall_time", "confirmed_mission_s"]
 
@@ -267,6 +267,7 @@ class MissionLog:
                 first, conf = r.get("first_seen_t"), r.get("confirmed_t")
                 out.write({
                     "tag_id": r["tag_id"], "x": r["x"], "y": r["y"],
+                    "x_raw": r.get("x_raw"), "y_raw": r.get("y_raw"),
                     "n_sightings": r["n_sightings"],
                     "first_seen_wall_time": None if first is None else format_wall(self.wall_time(first)),
                     "first_seen_mission_s": None if first is None else self.mission_elapsed(first),

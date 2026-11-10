@@ -138,6 +138,13 @@ class Tags:
     confirm_radius_m: float = 0.20
     outlier_radius_m: float = 0.30
     max_sightings_per_tag: int = 400
+    home_tag_id: int = -1              # tag at the takeoff spot to measure drift; -1 = off
+    home_tag_min_sightings: int = 5    # sightings needed for each home-tag fix
+    home_tag_wait_s: float = 8.0       # back home: look this long for the tag before landing anyway
+    home_tag_tol_m: float = 0.05       # land once a correction would move home less than this
+    home_tag_max_moves: int = 3        # correction moves before landing anyway
+    home_tag_max_drift_m: float = 1.0  # a bigger "drift" is a wrong sighting: ignore it
+    home_tag_correct_tags: bool = True # also correct the search tags for the measured drift
 
 
 @dataclass(frozen=True)
@@ -387,6 +394,11 @@ def validate(s: Settings) -> None:
     _check(t.max_sightings_per_tag >= t.min_sightings,
            f"tags.max_sightings_per_tag ({t.max_sightings_per_tag}) must be >= "
            f"tags.min_sightings ({t.min_sightings})")
+    _check(t.home_tag_id < 0 or t.home_tag_id < 30,
+           f"tags.home_tag_id must be -1 (off) or a tag16h5 id 0-29 (got {t.home_tag_id})")
+    _positive(t, "tags", "home_tag_min_sightings", "home_tag_wait_s", "home_tag_tol_m",
+              "home_tag_max_drift_m")
+    _non_negative(t, "tags", "home_tag_max_moves")
     _non_negative(t, "tags", "min_decision_margin", "max_hamming",
                   "expected_down_m", "down_tolerance_m", "expected_count")
     _check(all(abs(v) <= 0.5 for v in t.camera_pos_m),
