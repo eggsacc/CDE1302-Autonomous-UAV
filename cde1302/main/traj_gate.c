@@ -19,6 +19,7 @@ void traj_gate_start(traj_gate_t *g, int n_points, float sample_s, float lookahe
     g->accel = 0.0f;
     g->proj = 0.0f;
     g->speed = 0.0f;
+    g->wait_s = 0.0f;
 }
 
 void traj_gate_start_follow(traj_gate_t *g, int n_points, float sample_s, float corner_m,
@@ -78,10 +79,15 @@ static traj_gate_result_t follow_step(traj_gate_t *g, float elapsed_s, float dro
     }
     float limit = (float)(g->corner >= 0 ? g->corner : g->last);
 
-    /* At the corner (or the end)? */
-    if (distance(limit, drone_x, drone_y, point, ctx) <= g->corner_m) {
+    /* At the corner (or the end)?  Holding it, a wobbling or offset drone is
+     * let go after a while rather than waiting for luck. */
+    float to_corner = distance(limit, drone_x, drone_y, point, ctx);
+    if (to_corner <= g->corner_m
+            || (g->wait_s >= TRAJ_GATE_CORNER_SETTLE_S && to_corner <= 2.0f * g->corner_m)
+            || g->wait_s >= TRAJ_GATE_CORNER_MAX_WAIT_S) {
         g->proj = limit;
         g->k = limit;
+        g->wait_s = 0.0f;
         if (limit >= (float)g->last) {
             g->speed = 0.0f;
             return TRAJ_GATE_DONE;
@@ -118,7 +124,13 @@ static traj_gate_result_t follow_step(traj_gate_t *g, float elapsed_s, float dro
 
     /* Speed: ramp up at accel, capped by the plan and by the braking curve
      * that slows to TRAJ_GATE_CORNER_SPEED at corner_m before the corner. */
-    float brake = path_gap(g->proj, limit, point, ctx) - g->corner_m;
+    if (g->proj >= limit) {            /* holding the corner: no push along any leg */
+        g->wait_s += elapsed_s;
+        g->speed = 0.0f;
+        return TRAJ_GATE_WAIT;
+    }
+    float brake = path_gap(g->proj, limit, point, ctx) - g->corner_m
+                  - g->speed * TRAJ_GATE_BRAKE_LAG_S;
     if (brake < 0.0f) brake = 0.0f;
     float v_stop = sqrtf(TRAJ_GATE_CORNER_SPEED * TRAJ_GATE_CORNER_SPEED
                          + 2.0f * g->accel * brake);

@@ -162,3 +162,21 @@ def test_follow_stale_position_stops_the_feedforward(host):
     healthy = follow(host, seconds=20)
     frozen = follow(host, seconds=20, freeze=2.0)
     assert frozen.done_s < 0 and frozen.x < healthy.x / 3
+
+
+def test_follow_does_not_hang_at_a_corner(host):
+    # Flight 20261110_224757 sat 7-9 cm from corners for up to 12 s: a steady
+    # offset (here a 7 cm/s sideways push, about 7 cm) kept it outside the 5 cm
+    # corner circle, and the feedforward along the next leg pushed it past.
+    clean = follow(host, leg=1.0, leg2=0.5, corner=0.05, seconds=60)
+    for noise in (0.0, 0.06):
+        r = follow(host, leg=1.0, leg2=0.5, corner=0.05, seconds=60, push=0.07, noise=noise)
+        assert r.done_s > 0, f"hung at the corner (noise {noise})"
+        assert r.done_s < clean.done_s + 4.0           # at most a few seconds lost there
+        assert r.corner_err < 0.15                     # but it did get to the corner
+
+
+def test_follow_brakes_into_a_corner_without_overshooting(host):
+    # The PX4 model lags ~0.2 s: braking must allow for that.
+    r = follow(host, leg=2.0, leg2=0.5, corner=0.05, seconds=60, max_speed=0.5)
+    assert r.done_s > 0 and r.corner_err < 0.08

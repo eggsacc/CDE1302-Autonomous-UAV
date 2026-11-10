@@ -26,8 +26,12 @@
  * (TRAJ_GATE_FOLLOW_LEAD_S of planned travel, to cover the loop delay), and
  * outputs g->speed: the planned speed, ramped up at accel after a corner and
  * down along a braking curve to TRAJ_GATE_CORNER_SPEED by corner_m before the
- * next one.  The caller sends it as velocity feedforward along the path, so
- * PX4's position error is only the sideways correction plus a small lead.
+ * next one (TRAJ_GATE_BRAKE_LAG_S early).  The caller sends it as velocity
+ * feedforward along the path, so PX4's position error is only the sideways
+ * correction plus a small lead.  Once the progress reaches a corner the
+ * feedforward is 0: PX4 just holds the corner, until the drone is within
+ * corner_m, or within 2 x corner_m after TRAJ_GATE_CORNER_SETTLE_S, or
+ * TRAJ_GATE_CORNER_MAX_WAIT_S have passed.
  *
  * lookahead_m <= 0 plays on the clock, as if the drone always kept up.
  * The check uses the position the ESP32 reads from PX4 over UART, so Wi-Fi gaps
@@ -56,6 +60,13 @@ extern "C" {
 #define TRAJ_GATE_CORNER_SPEED 0.05f
 /* Follow mode: smallest corner radius (m), so the drone cannot creep forever. */
 #define TRAJ_GATE_FOLLOW_MIN_CORNER_M 0.03f
+/* Follow mode: start braking this much travel time early, for PX4's lag (s). */
+#define TRAJ_GATE_BRAKE_LAG_S 0.3f
+/* Follow mode, holding a corner: after this long, 2 x corner_m is close enough (s)... */
+#define TRAJ_GATE_CORNER_SETTLE_S 1.0f
+/* ...and after this long, move on whatever the distance (s).  A drone that
+ * wobbles 5-7 cm or holds a steady offset never "lands" in a 5 cm circle. */
+#define TRAJ_GATE_CORNER_MAX_WAIT_S 3.0f
 
 typedef enum {
     TRAJ_GATE_MOVE,     /* the target may have moved on */
@@ -75,6 +86,7 @@ typedef struct {
     float accel;        /* follow: speed-up / slow-down rate (m/s^2) */
     float proj;         /* follow: the drone's progress (closest point), in samples */
     float speed;        /* follow: feedforward speed along the path (m/s), output */
+    float wait_s;       /* follow: time the progress has been held at the corner (s) */
 } traj_gate_t;
 
 /* Waypoint mode: fly corner to corner, each reached within corner_m. */
