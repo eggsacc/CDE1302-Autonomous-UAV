@@ -461,6 +461,43 @@ static void send_speed_limit(void)
     ESP_LOGI(TAG, "Speed limit set: %.2f m/s", MAV_CMD_SPEED_CAP_MS);
 }
 
+// ---------------------------------------------------------------------------
+// Command: ask PX4 for position + attitude at PX4_STREAM_HZ
+//
+// With MAV_0_MODE = Normal (0), PX4 sends LOCAL_POSITION_NED only at 1 Hz.
+// Everything that reads the drone's position here then works on data up to a
+// second old: the trajectory gate (a 1 Hz surge-and-brake in follow and carrot
+// mode) and pose_hist (the pose stamped into each camera frame, so tag
+// positions).  Requesting the rates explicitly works whatever MAV_0_MODE is.
+// Re-sent with the speed limit, so a PX4 reboot cannot silently undo it.
+// ---------------------------------------------------------------------------
+#define PX4_STREAM_HZ 50
+
+static void request_interval(uint32_t msg_id)
+{
+    mavlink_message_t msg;
+    mavlink_msg_command_long_pack(
+        OBC_SYSID,
+        OBC_COMPID,
+        &msg,
+        PX4_SYSID,
+        PX4_COMPID,
+        MAV_CMD_SET_MESSAGE_INTERVAL,
+        0,
+        (float)msg_id,                    // param1: message id
+        1000000.0f / PX4_STREAM_HZ,       // param2: interval (us)
+        0, 0, 0, 0,
+        0                                 // param7: 0 = flight-stack default (this link)
+    );
+    send_message(&msg);
+}
+
+static void send_stream_rates(void)
+{
+    request_interval(MAVLINK_MSG_ID_LOCAL_POSITION_NED);
+    request_interval(MAVLINK_MSG_ID_ATTITUDE);
+}
+
 #if CONFIG_UWB_SEND_TO_PX4
 static void reply_timesync(const mavlink_message_t *in);
 #endif
@@ -857,6 +894,7 @@ void mavlink_task(void *arg)
 
     // Send once at task start so PX4 gets a low-speed constraint early.
     send_speed_limit();
+    send_stream_rates();
 
     // ---- 20Hz loop ----
     while (1) {
@@ -875,6 +913,7 @@ void mavlink_task(void *arg)
         // Re-apply speed limit as a guard against stack/mode resets.
         if (now_ms - last_speed_ms >= SPEED_LIMIT_REFRESH_MS) {
             send_speed_limit();
+            send_stream_rates();
             last_speed_ms = now_ms;
         }
 
