@@ -134,6 +134,17 @@ menu "Drone Configuration"
         help
           GPIO PX4 RX PIN
 
+    config CRUISE_ALT_CM
+        int "Flight height above the takeoff spot (cm)"
+        range 20 200
+        default 80
+        help
+          Takeoff climbs to this height and every GOTO and trajectory flies at it.
+          The laptop's tag filter must accept tags this far below the drone:
+          mission/config.yaml tags.max_down_m (and tags.expected_down_m).
+          Higher sees more floor per frame (wider lanes possible) but each tag
+          is smaller in the image.
+
     config TRAJ_WAYPOINTS
         bool "Trajectory: fly straight from corner to corner"
         default y

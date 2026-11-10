@@ -27,8 +27,8 @@ static const char *TAG = "wifi";
 
 #define WIFI_CONNECTED_BIT  BIT0
 
-/* Cruise altitude for CMD_GOTO — must match CRUISE_ALT_M in main.c */
-#define WIFI_CRUISE_ALT_M   0.5f
+/* Cruise altitude for CMD_GOTO: the same menuconfig height as main.c's takeoff */
+#define WIFI_CRUISE_ALT_M   (CONFIG_CRUISE_ALT_CM / 100.0f)
 
 static volatile bool s_land_requested  = false;
 static volatile bool s_start_requested = false;

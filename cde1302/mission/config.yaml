@@ -21,7 +21,7 @@ area:
   margin: 0.2           # keep waypoints this far inside the edges (m)
 
 sweep:
-  lane_spacing: 0.8      # max distance between lanes (m); measure camera swath in the lab
+  lane_spacing: 1.0      # max distance between lanes (m); measure camera swath in the lab
   lanes_along: x         # "x" = lanes run North-South, "y" = lanes run East-West
   camera_offset_m: 0.0   # trajectory mode: drone -> middle of the camera's view on the floor (m).
                          # The heading never changes, so the whole sweep is shifted this far
@@ -106,10 +106,12 @@ tags:
   max_detect_range_m: 1.5      # reject detections farther than this from the camera (m)
   max_yaw_rate_deg_s: 30.0     # reject frames taken while turning faster than this (deg/s)
   tags_on_floor: false         # true = ALL tags flat on the floor; course has some on walls
-  expected_down_m: 0.5         # floor only: expected tag "down" in body frame = flight altitude (m)
+  expected_down_m: 0.8         # floor only: expected tag "down" in body frame = flight height (m);
+                               # firmware menuconfig CRUISE_ALT_CM (80 cm)
   down_tolerance_m: 0.15       # floor only: reject if |down - expected_down_m| > this (m)
   min_down_m: -0.5             # walls too: reject tags more than 0.5 m ABOVE the drone (m, down +)
-  max_down_m: 0.65             # walls too: reject tags more than this BELOW the drone (m); floor = 0.5
+  max_down_m: 0.95             # walls too: reject tags more than this BELOW the drone (m); keep it
+                               # above the flight height (0.8 m) or floor tags are all rejected
   expected_count: 6            # tags in the area; 0 = unknown (disables early stop)
   min_sightings: 5             # sightings needed (within confirm_radius_m) to confirm a tag
   confirm_radius_m: 0.20       # sightings this close to the median count towards confirmation (m)

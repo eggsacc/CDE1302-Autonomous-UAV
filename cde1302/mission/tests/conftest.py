@@ -19,11 +19,12 @@ for p in (MISSION_DIR, LAPTOP_DIR):
 # config.yaml says for demo day: the sim's true tags (config.yaml
 # sim.true_tags) lie in it, under its 0.5 m lanes, with the localisation tags
 # at its far end, and the timings / drift sizes the tests expect assume
-# 0.15 m/s.  Everything else comes from config.yaml as it is.
+# 0.15 m/s at 0.5 m.  Everything else comes from config.yaml as it is.
 TEST_ARENA = {
     "area": {"x_min": 0.0, "x_max": 3.5, "y_min": -0.5, "y_max": 1.0, "margin": 0.0},
     "sweep": {"lane_spacing": 0.5},
     "flight": {"cruise_speed_mps": 0.15},
+    "tags": {"expected_down_m": 0.5, "max_down_m": 0.65},   # the sim and synthetic camera fly 0.5 m
     "localisation": {"tags": [{"id": 29, "x": 0.0, "y": 0.0},
                               {"id": 27, "x": 3.3, "y": -0.3},
                               {"id": 28, "x": 3.3, "y": 0.8}],
