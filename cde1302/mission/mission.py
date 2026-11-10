@@ -242,6 +242,7 @@ class Mission:
         self._hover_ok = False
         self._recent: deque[tuple[float, float, float]] = deque()
         self._settle_t: Optional[float] = None   # returning: when the drone got home
+        self._arrive_t = 0.0                     # ...first time (land_settle_max_s)
         self._next_status = 0.0
         self.reached: list[int] = []            # waypoint indices reached
         self.timeouts: list[int] = []           # waypoint indices that timed out
@@ -278,6 +279,7 @@ class Mission:
                     stop()
                 except Exception:
                     log.exception("error while stopping")
+        self._save_correction()
         self.log.event("PROGRAM_END", f"phase={self.phase.value} exit_code={self.exit_code}")
         self.log.close()
 
@@ -765,31 +767,34 @@ class Mission:
             self.drone.send_hold()
             self._land_home(why)
             return
-        # The firmware keeps the home setpoint: wait until the drone sits on it.
+        # The firmware keeps the home setpoint: hover briefly over it, then land.
         self._settle_t = now
+        self._arrive_t = now
         self._recent.clear()
 
     def _tick_settling(self, now: float) -> None:
-        """Land only once the drone has stayed within land_radius_m of home for
-        land_hold_s, or after land_settle_max_s whatever it does."""
+        """Over the landing spot: hover land_hold_s, then land.  Precision
+        landing may first move the spot onto the home tag (when it is more than
+        land_radius_m away), each move followed by another land_hold_s hover.
+        land_settle_max_s from arrival caps it all.  (Waiting to sit within a
+        few cm never ended on this drone: it wobbles 5-8 cm, and every flight
+        hovered the full 10 s, drifting.)"""
         f = self.settings.flight
+        p = self.drone.latest_pose()
+        hx, hy = self.land_target or self.home
+        err = math.hypot(p.x - hx, p.y - hy)
+        if now - self._arrive_t >= f.land_settle_max_s:
+            self.drone.send_hold() if self._correcting else None
+            self._correcting, self.job, self.leg = False, None, None
+            self._land_home(f"search complete, still correcting after {f.land_settle_max_s:.0f} s "
+                            f"({err * 100:.0f} cm from {self._spot_name})")
+            return
         if self._correcting and not self._correction_done(now):
             return
         if self._precision_land(now):
             return
-        p = self.drone.latest_pose()
-        self._recent.append((now, p.x, p.y))
-        while self._recent and now - self._recent[0][0] > f.land_hold_s:
-            self._recent.popleft()
-        span = self._recent[-1][0] - self._recent[0][0]
-        hx, hy = self.land_target or self.home
-        err = math.hypot(p.x - hx, p.y - hy)
-        if span >= f.land_hold_s - 1e-6 and all(
-                math.hypot(x - hx, y - hy) <= f.land_radius_m for _, x, y in self._recent):
+        if now - self._settle_t >= f.land_hold_s:
             self._land_home(f"search complete, {err * 100:.0f} cm from {self._spot_name}")
-        elif now - self._settle_t >= f.land_settle_max_s:
-            self._land_home(f"search complete, not settled within {f.land_radius_m * 100:.0f} cm "
-                            f"after {f.land_settle_max_s:.0f} s ({err * 100:.0f} cm from {self._spot_name})")
 
     @property
     def _spot_name(self) -> str:
@@ -1027,12 +1032,43 @@ class Mission:
             text += "\n" + self._localise(tags)
         return text
 
+    def _save_correction(self) -> None:
+        """After the flight (never before CMD_LAND: drawing takes a moment):
+        correction.png and trajectory_corrected.csv in the run folder."""
+        lo = self.settings.localisation
+        if self.loc_fit is None or not lo.save_plot or getattr(self, "_correction_saved", False):
+            return
+        self._correction_saved = True
+        try:
+            import correction_plot as cp
+            folder = self.log.folder
+            traj = cp.read_trajectory(folder / "trajectory.csv")
+            rows = cp.correct_trajectory(self.loc_fit, traj)
+            cp.write_csv(folder / "trajectory_corrected.csv", cp.TRAJ_CORRECTED_FIELDS, rows)
+            tags = correct(self.loc_fit, self.tag_map.estimates(confirmed_only=True))
+
+            def stamp(t: float) -> str:
+                return (f"T+{self.log.mission_elapsed(t) or 0.0:.1f} s  "
+                        f"{format_wall(self.log.wall_time(t))[11:19]}")
+
+            path = cp.plot_correction(folder / "correction.png", self.settings, self.loc_fit,
+                                      rows, tags, {g.id: (g.x, g.y) for g in lo.truth_tags},
+                                      f"Run {folder.name}: recorded vs corrected", stamp)
+            self.log.event("CORRECTION_SAVED", f"{path.name}, trajectory_corrected.csv")
+        except Exception as exc:                     # never let a picture break shutdown
+            log.exception("could not save the correction picture")
+            self.log.event("ERROR", f"correction picture: {exc}")
+
     def _localise(self, tags: list[TagEstimate]) -> str:
         """Fit the localisation tags and write the corrected report."""
         fit = self.loc_fit = self.loc.solve()
         corrected = correct(fit, tags)
         mission_s = self.log.mission_elapsed
         text = format_report(fit, corrected, mission_s)
+        truth = {g.id: (g.x, g.y) for g in self.settings.localisation.truth_tags}
+        if truth:
+            from correction_plot import format_errors, tag_errors
+            text += "\n" + format_errors(tag_errors(corrected, truth))
         self._echo(text)
         self.log.write_rows("localisation.csv", LOC_FIX_FIELDS, fix_rows(fit, mission_s))
         self.log.write_rows("tags_corrected.csv", TAGS_CORRECTED_FIELDS, corrected_rows(corrected))

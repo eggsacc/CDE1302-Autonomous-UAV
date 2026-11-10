@@ -170,8 +170,8 @@ def test_bad_localisation_config_is_rejected(kw, msg):
 # Whole mission in the simulator
 # ---------------------------------------------------------------------------
 
-def fly(tmp_path, **kw):
-    r = Rig(configure(tmp_path, flight={"stop_when_all_found": False}, **kw))
+def fly(tmp_path, flight=None, **kw):
+    r = Rig(configure(tmp_path, flight={"stop_when_all_found": False, **(flight or {})}, **kw))
     assert r.until(lambda: r.m.phase == Phase.READY, 5)
     r.m.command("takeoff")
     r.finish()
@@ -186,7 +186,9 @@ def real_position(r):
 
 
 def test_drift_is_corrected_and_the_drone_lands_on_the_home_tag(tmp_path):
-    r = fly(tmp_path, sim=DRIFT)
+    # The sim's drift leaves the tag ~6 cm off: below the default 8 cm "close
+    # enough", so ask for 3 cm to see the correction move.
+    r = fly(tmp_path, sim=DRIFT, flight={"land_radius_m": 0.03})
     m, s = r.m, r.m.settings
     truth = {t.id: (t.x, t.y) for t in s.sim.true_tags}
     tags = m.tag_map.estimates(confirmed_only=True)
@@ -348,3 +350,15 @@ def test_precision_landing_uses_the_tag_seen_on_the_way_home(tmp_path):
     seen_cm = float(re.search(r"seen (\d+) cm", ev[0]["details"]).group(1))
     assert seen_cm > 40                                # the tag really was far away
     assert math.hypot(*real_position(r)) < 0.06        # but it landed on it
+
+
+def test_mission_saves_the_correction_picture_after_landing(tmp_path):
+    r = fly(tmp_path, sim=DRIFT, localisation={"truth_tags": tuple(r_ for r_ in
+                                               load_settings().sim.true_tags)})
+    folder = r.m.log.folder
+    assert (folder / "correction.png").stat().st_size > 20_000
+    with open(folder / "trajectory_corrected.csv", newline="", encoding="utf-8") as fh:
+        assert len(list(csv.DictReader(fh))) > 100
+    names = [e["event"] for e in r.events()]
+    assert names.index("CORRECTION_SAVED") > names.index("LAND_CMD")   # never before landing
+    assert any("TAG ERRORS vs TRUE POSITIONS" in ln for ln in r.lines)

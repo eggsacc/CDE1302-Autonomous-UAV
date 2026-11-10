@@ -114,20 +114,18 @@ def test_full_sweep_visits_all_waypoints_returns_lands_and_confirms_all_tags(tmp
         assert len(list(csv.DictReader(fh))) > 500
 
 
-def test_lands_anyway_if_it_never_settles_over_home(tmp_path):
-    # The sim drone holds its setpoint perfectly, so shift the mission's idea of
-    # home by 20 cm once it starts waiting: the drone then never gets within 5 cm.
-    # (No precision landing: the home tag would put the landing spot back.)
-    r = Rig(configure(tmp_path, flight={"land_settle_max_s": 3.0},
-                      localisation={"enabled": False}))
+def test_lands_after_a_short_hover_over_home(tmp_path):
+    # No waiting to sit within a few cm (a real drone wobbles 5-8 cm): hover
+    # land_hold_s over the spot, then land, wherever exactly the drone is.
+    r = Rig(configure(tmp_path, localisation={"enabled": False}))
     r.until(lambda: r.m.phase == Phase.READY, 5)
     r.m.command("takeoff")
     assert r.until(lambda: r.m._settle_t is not None, 600)
     r.m.land_target = (r.m.land_target[0] + 0.2, r.m.land_target[1])
     t0 = r.clock()
     assert r.until(lambda: r.m.land_sent, 10)
-    assert r.clock() - t0 == pytest.approx(3.0, abs=0.3)
-    assert "not settled" in r.events("LAND_CMD")[0]["details"]
+    assert r.clock() - t0 == pytest.approx(r.m.settings.flight.land_hold_s, abs=0.25)
+    assert re.search(r"20 cm from (home|the home tag)", r.events("LAND_CMD")[0]["details"])
     r.finish()
     assert r.m.exit_code == 0 and r.drone.alt == 0.0
 

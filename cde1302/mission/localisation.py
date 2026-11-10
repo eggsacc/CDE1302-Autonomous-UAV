@@ -433,6 +433,7 @@ class CorrectedTag:
     raw_x: float              # PX4 frame (m), as in tags_final.csv
     raw_y: float
     n_sightings: int
+    first_seen_t: Optional[float] = None   # same clock as the sightings
 
     @property
     def shift_m(self) -> float:
@@ -445,7 +446,8 @@ def correct(fit: LocFit, tags: Iterable) -> list[CorrectedTag]:
     out = []
     for e in tags:
         x, y = t.apply(e.x, e.y)
-        out.append(CorrectedTag(e.tag_id, x, y, e.x, e.y, e.n_inliers))
+        out.append(CorrectedTag(e.tag_id, x, y, e.x, e.y, e.n_inliers,
+                                getattr(e, "first_seen_t", None)))
     return out
 
 

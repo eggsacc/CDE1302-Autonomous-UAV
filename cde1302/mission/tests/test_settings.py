@@ -60,7 +60,7 @@ def test_optional_sections_take_defaults(raw):
     ("tags", "outlier_radius_m", 0.1, "outlier_radius_m (0.1) must be >="),
     ("sweep", "lanes_along", "z", "sweep.lanes_along must be 'x' or 'y'"),
     ("area", "x_max", -1.0, "area.x_max (-1.0) must be > area.x_min"),
-    ("area", "margin", 1.6, "area.margin (1.6) is more than half"),
+    ("area", "margin", 5.0, "area.margin (5.0) is more than half"),
     ("logging", "level", "LOUD", "logging.level must be"),
 ])
 def test_bad_values_are_rejected(raw, section, key, value, message):

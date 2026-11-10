@@ -26,7 +26,8 @@ TEST_ARENA = {
     "flight": {"cruise_speed_mps": 0.15},
     "localisation": {"tags": [{"id": 29, "x": 0.0, "y": 0.0},
                               {"id": 27, "x": 3.3, "y": -0.3},
-                              {"id": 28, "x": 3.3, "y": 0.8}]},
+                              {"id": 28, "x": 3.3, "y": 0.8}],
+                     "truth_tags": []},
 }
 
 

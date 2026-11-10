@@ -194,6 +194,8 @@ class Localisation:
     takeoff_home_tag: bool = True
     align_to_home_tag: bool = True
     align_max_deg: float = 15.0
+    save_plot: bool = True             # correction.png + trajectory_corrected.csv after landing
+    truth_tags: tuple[TrueTag, ...] = ()   # test flights: true search-tag spots, for errors
     land_window_s: float = 2.0
     land_min_sightings: int = 5
     land_max_offset_m: float = 1.0
@@ -463,7 +465,10 @@ def validate(s: Settings) -> None:
     lo = s.localisation
     loc_ids = [tag.id for tag in lo.tags]
     _check(len(loc_ids) == len(set(loc_ids)), f"localisation.tags has duplicate ids: {loc_ids}")
-    for tid in loc_ids:
+    truth_ids = [tag.id for tag in lo.truth_tags]
+    _check(len(truth_ids) == len(set(truth_ids)),
+           f"localisation.truth_tags has duplicate ids: {truth_ids}")
+    for tid in loc_ids + truth_ids:
         _check(0 <= tid <= TAG16H5_MAX_ID,
                f"localisation.tags id {tid} is outside the tag16h5 ids 0-{TAG16H5_MAX_ID}")
     _check(lo.model in LOC_MODELS,

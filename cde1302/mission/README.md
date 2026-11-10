@@ -127,7 +127,7 @@ python mission/mission.py --map
 With the drone on the floor and **perfectly still**, type `calibrate`: PX4
 calibrates its gyros through the ESP32's MAVLink bridge (no QGroundControl
 needed; QGC must be **closed**, it uses the same port 14550). Wait for
-`GYRO_CAL_DONE`, about 5 s. Best after the drone has been powered for 1-2
+`GYRO_CAL_DONE` (it reports the old and new gyro offsets), about 5-8 s. Best after the drone has been powered for 1-2
 minutes, so the gyros are warm. `safety.require_gyro_cal: true` makes
 `takeoff` refuse until this has succeeded.
 
@@ -159,9 +159,19 @@ of the family, so they never clash with the course's tags from the front:
 Print them at the same 120 mm black-square size as the course tags, from the
 full tag16h5 family (the course sheet only goes up to 21).
 
-**Before the flight**, measure 27 and 28 on the tiles relative to the centre of
-29 (x along the search length, y to the right) and write them in
-`localisation.tags` in `config.yaml`. 29 stays at (0, 0).
+**Before the flight**, put the tags on grid nodes and click where they are:
+
+```bash
+python mission/tools/loc_layout.py
+```
+
+The window shows the floor grid (nodes 0.46 m apart, seen from behind the
+drone: start at the bottom, facing up). Pick an ID (22-29), click its node;
+right-click removes it. The tag on START (0, 0) is the home tag. **Save to
+config** writes `localisation.tags` and `home_tag_id` into `config.yaml`
+(the old file is kept as `config.yaml.bak`). Node (a, b) is x = b × 0.46 m
+forward, y = a × 0.46 m to the right. More tags spread over the area give the
+correction more to work with; keep them under a lane so the camera sees them.
 
 **What happens:**
 
@@ -189,8 +199,12 @@ before landing. Turn off with `localisation.enabled: false`.
   (`ALIGNED` event). Tag 29 must be taped square to the tiles; any side can face
   forward. Turns over `align_max_deg` (15°) are ignored as wrong readings.
 
-**Before/after analysis** (after a flight, from the log): recorded vs corrected
-route and tags on one map, plus the error against the true tag positions:
+**Before/after picture**: saved automatically after every flight (after
+landing) as `correction.png` in the run folder, with `trajectory_corrected.csv`.
+It shows the recorded vs corrected route and tags, every tag labelled with its
+corrected position and when it was seen (loc tags: each visit), and, for test
+flights with `localisation.truth_tags` filled in, the error before/after. To
+redo it from the log (e.g. after re-measuring the loc tags):
 
 ```bash
 python mission/tools/relocalise.py mission/logs/<run> --truth "2:1.3,-1.35 4:2.76,0.92" --plot
@@ -303,6 +317,7 @@ For a fair comparison, change only `uwb.send_to_px4` between flights.
 | `uwb.mirror must be text` | Write `"yes"` with quotes |
 | `GYRO_CAL_FAILED ... close QGroundControl` | QGC is holding UDP 14550. Close it and type `calibrate` again |
 | `GYRO_CAL_FAILED ... motion` | The drone moved during calibration. Keep it still and retry |
+| `GYRO_CAL_FAILED ... offsets did not change` | PX4 accepted but did not finish: usually it moved. Keep it still and retry |
 | `GYRO_CAL_FAILED ... no answer from PX4` | No MAVLink bridge reply: check the drone is on and pingable |
 | ESP-IDF: `supports Python 3.10 or newer but you are using 3.7` | pyenv's global Python is old. In that window: `$env:PYENV_VERSION = "3.10.0"` |
 | `idf_pinned.ps1 cannot be loaded because running scripts is disabled` | `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` first |
