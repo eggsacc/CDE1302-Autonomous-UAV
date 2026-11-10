@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """AprilTag detection on the laptop using the drone's OWN detector.
 
-The firmware detects with components/esp-apriltag (AprilTag 3.4.5, a truncated
-tag16h5 code table).  A pip-installed AprilTag is not a substitute: 3.1.0
+The firmware detects with components/esp-apriltag (AprilTag 3.4.5, the
+tag16h5 code table, IDs 0-29).  A pip-installed AprilTag is not a substitute: 3.1.0
 computes decision_margin before decode_sharpening, so the same real tag scores
 ~207 in the firmware and ~58 in pupil-apriltags, which makes the firmware's
 `margin > 55` gate meaningless.  This module compiles the in-tree sources for
@@ -88,8 +88,9 @@ POSE_ERR_LIMIT = 0.5
 # convention; subtract this once, where you draw or call solvePnP.
 PIXEL_CENTRE_OFFSET = 0.5
 
-# tag16h5 as this project ships it: IDs 0-21 (0-11 landing, 12-21 nav).
-EXPECTED_NCODES = 22
+# tag16h5 as this project ships it: the full family, IDs 0-29 (0-11 landing,
+# 12-21 nav, 27-29 the mission's localisation tags; tag16h5.c).
+EXPECTED_NCODES = 30
 
 MAX_DETECTIONS = 32     # per frame; extras are counted, not returned
 
@@ -469,7 +470,7 @@ class Detector:
 
     @property
     def ncodes(self) -> int:
-        """IDs the compiled tag16h5 family can decode (22 in this repo)."""
+        """IDs the compiled tag16h5 family can decode (30 in this repo)."""
         self._check_open()
         return self._lib.ath_family_ncodes(self._handle)
 

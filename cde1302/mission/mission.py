@@ -45,6 +45,13 @@ With sweep.start_at_home the plan and the area are then moved together so the
 first waypoint is home (the takeoff spot); the area's size and shape stay.
 sweep.start_in_middle centres the lanes across home instead.
 
+With localisation.enabled, sightings of the localisation tags (known spots on
+the floor, localisation.py) are kept out of the tag map.  The home tag sets
+the landing spot (seen at takeoff, then again over home: precision landing,
+the drone is moved over it before CMD_LAND).  At the tag report all of them
+fit a PX4 -> arena transform that corrects the reported tag positions
+(tags_corrected.csv).  None of this is sent to PX4 as odometry.
+
 With uwb.send_to_px4, UWB/PX4 position pairs are collected during the sweep
 (uwb_feed.py).  Once they give a good alignment it is sent to the drone, which
 feeds PX4 from then on.  A sweep with no alignment simply flies on without UWB.
@@ -78,6 +85,8 @@ from protocol import NAV_ARRIVED, NAV_FLYING, NAV_IDLE, NAV_ROTATING, NAV_STUCK,
 import planner
 from drone_link import DroneLink, Pose
 from interfaces import DroneInterface, SightingSource
+from localisation import (LOC_FIX_FIELDS, TAGS_CORRECTED_FIELDS, LocFit, LocTags, correct,
+                          corrected_rows, fix_rows, format_report)
 from mission_log import MissionLog, format_wall
 from mission_state import MissionState
 from settings import Area, ConfigError, DEFAULT_CONFIG_PATH, Settings, load_settings
@@ -184,9 +193,15 @@ class Mission:
                  tag_map: TagMap, mlog: MissionLog, *,
                  waypoints: list[tuple[float, float]], auto: bool = False,
                  echo: Optional[Callable[[str], None]] = None,
-                 uwb=None) -> None:
+                 uwb=None, loc: Optional[LocTags] = None) -> None:
         validate_plan(waypoints, settings.area)
         self.settings = settings
+        self.loc = loc if loc is not None else LocTags(settings)
+        self.land_target: Optional[tuple[float, float]] = None   # home, or the home tag
+        self.loc_fit: Optional[LocFit] = None    # set by report()
+        self._correcting = False                 # precision landing: a move is playing
+        self._land_corrections = 0
+        self._land_tag_ignored = False
         self.drone = drone
         self.source = source
         self.tag_map = tag_map
@@ -328,7 +343,8 @@ class Mission:
         self.state.set(phase=self.phase.value, pose=self.drone.latest_pose(),
                        home=self.home, wp_index=self.wp_index,
                        tags=tuple(self.tag_map.estimates()),
-                       mission_s=self.log.mission_elapsed(now))
+                       mission_s=self.log.mission_elapsed(now),
+                       land_target=self.land_target, loc_tags=self.loc.marks())
         return self.phase != Phase.DONE
 
     def _set_phase(self, new: Phase, reason: str = "") -> None:
@@ -344,8 +360,9 @@ class Mission:
             return
         pose = self.drone.latest_pose()
         if pose is not None:
+            extra = [self.land_target] if self.land_target is not None else []
             x0, x1, y0, y1 = geofence(self.area, self.home, sf.geofence_margin_m,
-                                      self.waypoints)
+                                      self.waypoints + extra)
             if not (x0 <= pose.x <= x1 and y0 <= pose.y <= y1):
                 self.abort(f"geofence: drone at ({pose.x:.2f}, {pose.y:.2f})")
 
@@ -381,6 +398,7 @@ class Mission:
             log.error("takeoff refused: no fresh telemetry")
             return
         self.home = (pose.x, pose.y)
+        self.land_target = self.home
         self.log.event("HOME", f"({pose.x:.3f}, {pose.y:.3f}) heading "
                        f"{math.degrees(pose.heading):.1f} deg (PX4 local NED)")
         t_cmd = self.drone.now()                   # timestamp = when sending began
@@ -434,6 +452,7 @@ class Mission:
         if self._hover_ok and (self.auto or self._start_requested):
             self.wp_index = 0
             self._set_phase(Phase.EXPLORING, "auto" if self.auto else "operator start")
+            self._home_tag_at_takeoff()
             p = self.drone.latest_pose()
             if self.use_trajectory:
                 self._shift_plan_for_camera(p.heading)
@@ -445,6 +464,30 @@ class Mission:
                 self.job = self._new_traj("sweep", (p.x, p.y), self.waypoints, now)
             else:
                 self._start_waypoint(now)
+
+    def _home_tag_at_takeoff(self) -> None:
+        """localisation.takeoff_home_tag: return to where the home tag was seen
+        during takeoff and hover (the box centre in PX4's frame, before any
+        drift), not to wherever the drone happened to be put down."""
+        lo = self.settings.localisation
+        if not (lo.enabled and lo.takeoff_home_tag) or self.home is None:
+            return
+        est = self.loc.recent_estimate(lo.home_tag_id, self._takeoff_t, math.inf,
+                                       lo.min_visit_sightings)
+        if est is None:
+            self.log.event("HOME_TAG_NOT_SEEN", f"tag {lo.home_tag_id}: fewer than "
+                           f"{lo.min_visit_sightings} sightings during takeoff; "
+                           f"returning to the takeoff pose")
+            return
+        x, y, n = est
+        off = math.dist((x, y), self.home)
+        if off > lo.land_max_offset_m:
+            self.log.event("HOME_TAG_IGNORED", f"tag {lo.home_tag_id} at ({x:.3f}, {y:.3f}) is "
+                           f"{off:.2f} m from the takeoff pose > land_max_offset_m")
+            return
+        self.land_target = (x, y)
+        self.log.event("HOME_TAG", f"tag {lo.home_tag_id} at ({x:.3f}, {y:.3f}) from {n} "
+                       f"sightings, {off * 100:.0f} cm from the takeoff pose: landing spot")
 
     def _shift_plan_for_camera(self, heading: float) -> None:
         """Trajectory mode: the heading is now fixed, so move the sweep back so
@@ -596,13 +639,14 @@ class Mission:
 
     def _begin_return(self, now: float, reason: str) -> None:
         self._set_phase(Phase.RETURNING, reason)
+        target = self.land_target or self.home
         if not self.use_trajectory:
-            self.leg = self._new_leg("return home", self.home, now)
+            self.leg = self._new_leg("return home", target, now)
             return
         if self.job is not None and self.job.result is None:
             self.drone.send_hold()               # cancels the sweep still playing
         p = self.drone.latest_pose()
-        self.job = self._new_traj("return home", (p.x, p.y), [self.home], now)
+        self.job = self._new_traj("return home", (p.x, p.y), [target], now)
 
     def _tick_returning(self, now: float) -> None:
         if self._settle_t is not None:
@@ -634,19 +678,79 @@ class Mission:
         """Land only once the drone has stayed within land_radius_m of home for
         land_hold_s, or after land_settle_max_s whatever it does."""
         f = self.settings.flight
+        if self._correcting and not self._correction_done(now):
+            return
+        if self._precision_land(now):
+            return
         p = self.drone.latest_pose()
         self._recent.append((now, p.x, p.y))
         while self._recent and now - self._recent[0][0] > f.land_hold_s:
             self._recent.popleft()
         span = self._recent[-1][0] - self._recent[0][0]
-        hx, hy = self.home
+        hx, hy = self.land_target or self.home
         err = math.hypot(p.x - hx, p.y - hy)
         if span >= f.land_hold_s - 1e-6 and all(
                 math.hypot(x - hx, y - hy) <= f.land_radius_m for _, x, y in self._recent):
-            self._land_home(f"search complete, {err * 100:.0f} cm from home")
+            self._land_home(f"search complete, {err * 100:.0f} cm from {self._spot_name}")
         elif now - self._settle_t >= f.land_settle_max_s:
             self._land_home(f"search complete, not settled within {f.land_radius_m * 100:.0f} cm "
-                            f"after {f.land_settle_max_s:.0f} s ({err * 100:.0f} cm from home)")
+                            f"after {f.land_settle_max_s:.0f} s ({err * 100:.0f} cm from {self._spot_name})")
+
+    @property
+    def _spot_name(self) -> str:
+        return "home" if self.land_target in (None, self.home) else "the home tag"
+
+    def _correction_done(self, now: float) -> bool:
+        """Precision landing: is the move over the home tag finished?  Then the
+        settle wait starts again from here."""
+        if self.job is not None:
+            if self._update_traj(now) is None:
+                return False
+            self.job = None
+        elif self.leg is not None:
+            if self._update_leg(now) is None:
+                return False
+            self.leg = None
+        self._correcting = False
+        self._settle_t = now
+        self._recent.clear()
+        return True
+
+    def _precision_land(self, now: float) -> bool:
+        """localisation.precision_landing: if the home tag, seen since the drone
+        settled, is not under the landing spot, move the spot onto it and fly
+        there.  True when a correction move was started."""
+        lo = self.settings.localisation
+        if (not (lo.enabled and lo.precision_landing) or self.home is None
+                or self._land_corrections >= lo.land_max_corrections):
+            return False
+        est = self.loc.recent_estimate(lo.home_tag_id, self._settle_t, lo.land_window_s,
+                                       lo.land_min_sightings)
+        if est is None:
+            return False
+        x, y, n = est
+        off = math.dist((x, y), self.land_target or self.home)
+        if off <= self.settings.flight.land_radius_m:
+            return False
+        if math.dist((x, y), self.home) > lo.land_max_offset_m:
+            if not self._land_tag_ignored:
+                self._land_tag_ignored = True
+                self.log.event("LAND_TAG_IGNORED", f"tag {lo.home_tag_id} at ({x:.3f}, {y:.3f}) "
+                               f"is more than land_max_offset_m {lo.land_max_offset_m} m "
+                               f"from the takeoff pose")
+            return False
+        self._land_corrections += 1
+        self.land_target = (x, y)
+        self.log.event("LAND_TARGET", f"home tag {lo.home_tag_id} seen {off * 100:.0f} cm from "
+                       f"the landing spot ({n} sightings): moving over it at ({x:.3f}, {y:.3f}), "
+                       f"correction {self._land_corrections}/{lo.land_max_corrections}")
+        self._correcting = True
+        p = self.drone.latest_pose()
+        if self.use_trajectory:
+            self.job = self._new_traj("land correction", (p.x, p.y), [self.land_target], now)
+        else:
+            self.leg = self._new_leg("land correction", self.land_target, now)
+        return True
 
     def _land_home(self, reason: str) -> None:
         self._settle_t = None
@@ -793,6 +897,7 @@ class Mission:
         log.warning("ABORT: %s", reason)
         self.leg = None
         self.job = None
+        self._correcting = False
         if self.start_sent:
             self._report_and_land(f"abort: {reason}")
             self._set_phase(Phase.ABORT_LANDING, reason)
@@ -820,6 +925,20 @@ class Mission:
         self._echo(text)
         path = self.log.write_tags_final(self.tag_map.final_rows())
         self.log.event("TAG_REPORT", f"{len(tags)} tags -> {path.name}")
+        if self.settings.localisation.enabled:
+            text += "\n" + self._localise(tags)
+        return text
+
+    def _localise(self, tags: list[TagEstimate]) -> str:
+        """Fit the localisation tags and write the corrected report."""
+        fit = self.loc_fit = self.loc.solve()
+        corrected = correct(fit, tags)
+        mission_s = self.log.mission_elapsed
+        text = format_report(fit, corrected, mission_s)
+        self._echo(text)
+        self.log.write_rows("localisation.csv", LOC_FIX_FIELDS, fix_rows(fit, mission_s))
+        self.log.write_rows("tags_corrected.csv", TAGS_CORRECTED_FIELDS, corrected_rows(corrected))
+        self.log.event("LOC_FIT" if fit.ok else "LOC_FIT_FAILED", fit.summary())
         return text
 
     # -- display ------------------------------------------------------------
@@ -855,13 +974,17 @@ def build(settings: Settings, *, sim: bool = False, dry_run: bool = False,
                       clock=clock, echo=echo)
     tag_map = TagMap.from_settings(settings.tags, on_confirm=lambda e: mlog.tag_confirmed(
         e.tag_id, e.x, e.y, e.support, t=e.confirmed_t))
+    loc = LocTags(settings)
 
     def on_command(name: str, details: str) -> None:
         mlog.event(name, details)
 
     def on_sighting(s: Sighting) -> None:
         mlog.detection(s.t_detect, s.t_capture, **s.log_fields())
-        tag_map.add(s)
+        if loc.wants(s.tag_id):              # localisation tags never enter the tag map
+            loc.add(s)
+        else:
+            tag_map.add(s)
 
     drone: DroneInterface
     source: SightingSource
@@ -878,7 +1001,8 @@ def build(settings: Settings, *, sim: bool = False, dry_run: bool = False,
             uwb = UwbFeed(settings, on_reading=(lambda **f: mlog.uwb(mlog.now(), **f))
                           if settings.uwb.record else None)
     return Mission(settings, drone, source, tag_map, mlog,
-                   waypoints=plan_waypoints(settings), auto=auto, echo=echo, uwb=uwb)
+                   waypoints=plan_waypoints(settings), auto=auto, echo=echo, uwb=uwb,
+                   loc=loc)
 
 
 def run(mission: Mission, *, period_s: float,

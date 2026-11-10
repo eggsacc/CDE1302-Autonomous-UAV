@@ -17,7 +17,9 @@ from tag_pipeline import R_YAW_RATE, TagPipeline
 
 @pytest.fixture
 def settings():
-    return load_settings()
+    """config.yaml without the localisation tags: these tests place their own."""
+    s = load_settings()
+    return dataclasses.replace(s, localisation=dataclasses.replace(s.localisation, enabled=False))
 
 
 @pytest.fixture

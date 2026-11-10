@@ -24,7 +24,17 @@ nav_task.c, simplified:
 
 Telemetry (10 Hz) adds pose_noise_m; each command datagram can be lost with
 probability command_loss.  pause_telemetry() makes the link go silent, for
-stale-telemetry tests.  There is no EKF drift and no obstacle model.
+stale-telemetry tests.  There is no obstacle model.
+
+EKF drift (sim.drift_*): the sim's x, y, heading are PX4's ESTIMATE, which
+is what the drone flies by and reports.  The real world, which the camera
+sees, is that estimate mapped back through
+
+    estimate = (1 + drift_scale) * R(drift_rot_deg) * real + creep
+
+where creep grows at (drift_x_mps, drift_y_mps) while airborne.  The real
+world is the arena frame of localisation.py, with the localisation tags at
+their config positions, so their correction should undo this.
 
 SimTagSource makes `camera_fps` frames per second.  A true tag is "seen" when
 the drone is airborne and the tag lies between view_min_m and view_max_m
@@ -136,6 +146,7 @@ class SimDrone:
         # playing trajectory: (origin x, origin y, offsets (n, 3), dt s, start t)
         self._traj: Optional[tuple[float, float, np.ndarray, float, float]] = None
         self._hold: tuple[float, float] = (self.x, self.y)
+        self._creep = [0.0, 0.0]                   # sim.drift_x/y_mps, integrated
 
         self._t: Optional[float] = None            # sim time reached
         self._next_telem = 0.0
@@ -333,8 +344,19 @@ class SimDrone:
                     if not self._telem_paused:
                         self._emit_telemetry()
 
+    def real_from_estimate(self, x: float, y: float,
+                           heading: float) -> tuple[float, float, float]:
+        """Where the drone really is when PX4 thinks (x, y, heading) (sim.drift_*)."""
+        s = self.settings.sim
+        rot = math.radians(s.drift_rot_deg)
+        dx, dy = x - self._creep[0], y - self._creep[1]
+        c, sn = math.cos(-rot), math.sin(-rot)
+        k = 1.0 + s.drift_scale
+        return ((c * dx - sn * dy) / k, (sn * dx + c * dy) / k, wrap_angle(heading - rot))
+
     def _record_truth(self) -> None:
-        self._truth.append(Pose(self._t, self.x, self.y, self.heading, self.nav))
+        rx, ry, rh = self.real_from_estimate(self.x, self.y, self.heading)
+        self._truth.append(Pose(self._t, rx, ry, rh, self.nav))
         self._alt_hist.append(Pose(self._t, self.alt, 0.0, 0.0, 0))
 
     def _emit_telemetry(self) -> None:
@@ -362,6 +384,9 @@ class SimDrone:
 
     def _step(self, dt: float) -> None:
         s = self.settings.sim
+        if self.alt > 0.0:
+            self._creep[0] += s.drift_x_mps * dt
+            self._creep[1] += s.drift_y_mps * dt
         climb = s.climb_rate_mps * dt
         if self.phase == "ARMING":
             if self._t - self._phase_t >= s.arm_delay_s:
@@ -437,6 +462,9 @@ class SimTagSource:
         self._threaded = threaded
         self._rng = rng or random.Random(settings.sim.seed + 1)
         self._filter = TagFilter(settings.tags)
+        # Floor tags: the mission's true tags plus the localisation tags.
+        loc = settings.localisation
+        self.floor_tags = tuple(settings.sim.true_tags) + (tuple(loc.tags) if loc.enabled else ())
         self._period = 1.0 / settings.sim.camera_fps
         self._next_capture: Optional[float] = None
         self._pending: list[tuple[float, Sighting]] = []   # (deliver_t, sighting)
@@ -453,7 +481,7 @@ class SimTagSource:
         if self._threaded:
             self._thread = threading.Thread(target=self._run, name="sim-camera", daemon=True)
             self._thread.start()
-        log.info("Simulated camera: %d true tags, %.0f fps", len(self.settings.sim.true_tags),
+        log.info("Simulated camera: %d floor tags, %.0f fps", len(self.floor_tags),
                  self.settings.sim.camera_fps)
 
     def stop(self) -> None:
@@ -527,7 +555,7 @@ class SimTagSource:
         if alt <= AIRBORNE_M:
             return
         seen: list[tuple[int, float, float, float, float]] = []    # id, f, r, north, east
-        for tag in sim.true_tags:
+        for tag in self.floor_tags:
             f, r = ned_to_body(tag.x, tag.y, x, y, heading)
             if self.in_view(f, r):
                 seen.append((tag.id, f, r, tag.x, tag.y))
@@ -566,7 +594,7 @@ class SimTagSource:
         if self._view_cache is not None and self._view_cache.t_capture == tc:
             return self._view_cache
         drone = (x, y, heading)
-        floor = [FloorTag(t.id, t.x, t.y) for t in self.settings.sim.true_tags]
+        floor = [FloorTag(t.id, t.x, t.y) for t in self.floor_tags]
         pitch = self.settings.tags.camera_pitch_deg
         gray = render_view(floor, drone, altitude=round(max(alt, 0.02), 2), supersample=1,
                            jpeg_quality=None, seed=int(tc * 1000) % 100000, pitch_deg=pitch)

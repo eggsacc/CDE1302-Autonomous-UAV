@@ -18,14 +18,14 @@ TICK = 0.1
 
 
 def configure(tmp_path, *, flight=None, safety=None, sim=None, tags=None, sweep=None,
-              uwb=None):
+              uwb=None, localisation=None):
     """config.yaml with overrides.  sweep.start_at_home is off unless asked for:
     the sim's true tags are laid out in the area exactly as config.yaml writes it."""
     s = load_settings()
     s = dataclasses.replace(s, logging=dataclasses.replace(s.logging, log_dir=str(tmp_path)))
     sweep = {"start_at_home": False, "start_in_middle": False, **(sweep or {})}
     for name, kw in (("flight", flight), ("safety", safety), ("sim", sim), ("tags", tags),
-                     ("sweep", sweep), ("uwb", uwb)):
+                     ("sweep", sweep), ("uwb", uwb), ("localisation", localisation)):
         if kw:
             s = dataclasses.replace(s, **{name: dataclasses.replace(getattr(s, name), **kw)})
     return s
@@ -89,7 +89,7 @@ def test_full_sweep_visits_all_waypoints_returns_lands_and_confirms_all_tags(tmp
     assert m.reached == list(range(len(m.waypoints))) and m.timeouts == []
     # Back home, settled within land_radius_m, and landed.
     assert math.hypot(d.x - m.home[0], d.y - m.home[1]) <= s.flight.land_radius_m + 0.01
-    assert "cm from home" in r.events("LAND_CMD")[0]["details"]
+    assert re.search(r"cm from (home|the home tag)", r.events("LAND_CMD")[0]["details"])
     assert d.alt == 0.0 and not d.armed
     # Every tag confirmed, within a few cm of the truth.
     truth = {t.id: (t.x, t.y) for t in s.sim.true_tags}
@@ -116,11 +116,13 @@ def test_full_sweep_visits_all_waypoints_returns_lands_and_confirms_all_tags(tmp
 def test_lands_anyway_if_it_never_settles_over_home(tmp_path):
     # The sim drone holds its setpoint perfectly, so shift the mission's idea of
     # home by 20 cm once it starts waiting: the drone then never gets within 5 cm.
-    r = Rig(configure(tmp_path, flight={"land_settle_max_s": 3.0}))
+    # (No precision landing: the home tag would put the landing spot back.)
+    r = Rig(configure(tmp_path, flight={"land_settle_max_s": 3.0},
+                      localisation={"enabled": False}))
     r.until(lambda: r.m.phase == Phase.READY, 5)
     r.m.command("takeoff")
     assert r.until(lambda: r.m._settle_t is not None, 600)
-    r.m.home = (r.m.home[0] + 0.2, r.m.home[1])
+    r.m.land_target = (r.m.land_target[0] + 0.2, r.m.land_target[1])
     t0 = r.clock()
     assert r.until(lambda: r.m.land_sent, 10)
     assert r.clock() - t0 == pytest.approx(3.0, abs=0.3)

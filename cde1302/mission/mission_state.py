@@ -30,6 +30,8 @@ class StateSnapshot:
     mission_s: Optional[float] = None          # since the takeoff command
     dry_run: bool = False
     message: str = ""                          # last notable event, for a status line
+    land_target: Optional[tuple[float, float]] = None   # where it returns + lands (home tag)
+    loc_tags: tuple = ()                       # localisation.LocMark per localisation tag
 
     @property
     def confirmed_tags(self) -> tuple[TagEstimate, ...]:

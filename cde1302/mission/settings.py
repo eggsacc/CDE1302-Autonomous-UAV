@@ -17,7 +17,7 @@ import dataclasses
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, get_type_hints
+from typing import Any, Optional, get_type_hints
 
 import yaml
 
@@ -26,6 +26,8 @@ REPO_DIR = MISSION_DIR.parent              # cde1302/
 DEFAULT_CONFIG_PATH = MISSION_DIR / "config.yaml"
 
 FIRMWARE_SPEED_CAP_MPS = 0.50    # MAV_CMD_SPEED_CAP_MS in main/mavlink_task.h
+TAG16H5_MAX_ID = 29              # components/esp-apriltag/apriltag/tag16h5.c: ids 0-29
+LOC_MODELS = ("similarity", "rigid", "translation")   # localisation.py, most to fewest DOF
 
 
 class ConfigError(ValueError):
@@ -164,6 +166,42 @@ class Sim:
     view_min_m: float = -0.35
     view_max_m: float = 0.28
     true_tags: tuple[TrueTag, ...] = ()
+    drift_scale: float = 0.0           # odometry scale error: PX4 sees (1 + this) x the real distance
+    drift_rot_deg: float = 0.0         # PX4's frame turned this far from the real one (deg, cw +)
+    drift_x_mps: float = 0.0           # PX4's position creeps this fast north while airborne (m/s)
+    drift_y_mps: float = 0.0           # ...and east (m/s)
+
+
+@dataclass(frozen=True)
+class Localisation:
+    """Known-position tags for drift correction and precision landing (localisation.py)."""
+    enabled: bool = False
+    home_tag_id: int = 29
+    tags: tuple[TrueTag, ...] = ()     # arena-frame positions (m)
+    model: str = "similarity"
+    visit_gap_s: float = 5.0
+    min_visit_sightings: int = 5
+    min_span_m: float = 1.0
+    max_rms_m: float = 0.15
+    max_rotation_deg: float = 20.0
+    max_scale_error: float = 0.25
+    precision_landing: bool = True
+    takeoff_home_tag: bool = True
+    land_window_s: float = 2.0
+    land_min_sightings: int = 5
+    land_max_offset_m: float = 0.6
+    land_max_corrections: int = 3
+
+    @property
+    def ids(self) -> frozenset[int]:
+        return frozenset(t.id for t in self.tags) if self.enabled else frozenset()
+
+    def ref(self, tag_id: int) -> Optional[tuple[float, float]]:
+        """Arena-frame (x, y) of a localisation tag, or None."""
+        for t in self.tags:
+            if t.id == tag_id:
+                return (t.x, t.y)
+        return None
 
 
 @dataclass(frozen=True)
@@ -221,6 +259,7 @@ class Settings:
     logging: Logging = field(default_factory=Logging)
     live_map: LiveMap = field(default_factory=LiveMap)
     uwb: Uwb = field(default_factory=Uwb)
+    localisation: Localisation = field(default_factory=Localisation)
     source: Path | None = None               # file it was loaded from
     raw: dict = field(default_factory=dict, compare=False, repr=False)
 
@@ -407,9 +446,31 @@ def validate(s: Settings) -> None:
     ids = [tag.id for tag in m.true_tags]
     _check(len(ids) == len(set(ids)), f"sim.true_tags has duplicate ids: {ids}")
     for tag in m.true_tags:
-        # This repo's tag16h5 table is truncated to ids 0-21 (apriltag_host.py).
-        _check(0 <= tag.id <= 21,
-               f"sim.true_tags id {tag.id} is outside the detectable ids 0-21")
+        _check(0 <= tag.id <= TAG16H5_MAX_ID,
+               f"sim.true_tags id {tag.id} is outside the tag16h5 ids 0-{TAG16H5_MAX_ID}")
+    _check(m.drift_scale > -0.5, f"sim.drift_scale must be > -0.5 (got {m.drift_scale})")
+
+    lo = s.localisation
+    loc_ids = [tag.id for tag in lo.tags]
+    _check(len(loc_ids) == len(set(loc_ids)), f"localisation.tags has duplicate ids: {loc_ids}")
+    for tid in loc_ids:
+        _check(0 <= tid <= TAG16H5_MAX_ID,
+               f"localisation.tags id {tid} is outside the tag16h5 ids 0-{TAG16H5_MAX_ID}")
+    _check(lo.model in LOC_MODELS,
+           f"localisation.model must be one of {', '.join(LOC_MODELS)} (got {lo.model!r})")
+    _positive(lo, "localisation", "visit_gap_s", "min_visit_sightings", "max_rms_m",
+              "land_window_s", "land_min_sightings", "land_max_offset_m")
+    _non_negative(lo, "localisation", "min_span_m", "max_rotation_deg", "max_scale_error",
+                  "land_max_corrections")
+    _check(lo.max_scale_error < 1.0,
+           f"localisation.max_scale_error must be < 1 (got {lo.max_scale_error})")
+    if lo.enabled:
+        _check(bool(lo.tags), "localisation.enabled needs at least one entry in localisation.tags")
+        clash = sorted(set(loc_ids) & set(ids))
+        _check(not clash, f"sim.true_tags uses localisation tag id(s) {clash}")
+        if lo.precision_landing or lo.takeoff_home_tag:
+            _check(lo.home_tag_id in loc_ids,
+                   f"localisation.home_tag_id {lo.home_tag_id} is not in localisation.tags")
 
     _positive(s.logging, "logging", "status_period_s")
     _positive(s.live_map, "live_map", "redraw_hz", "arrow_m", "camera_stale_s")

@@ -28,10 +28,12 @@ either expressed or implied, of the Regents of The University of Michigan.
 #include <stdlib.h>
 #include "tag16h5.h"
 
-/* Truncated family: only the IDs this project uses (0-11 landing tags,
-   12-21 nav tags, see laptop/setup.yaml).  ncodes below is derived from this
-   array — a mismatch reads past the end and makes IDs undetectable. */
-static uint64_t codedata[22] = {
+/* Full tag16h5 family, IDs 0-29.  The course template shipped it truncated to
+   0-21 (0-11 landing tags, 12-21 nav tags, see laptop/setup.yaml); 22-29 were
+   restored for the mission's localisation tags (27-29, mission/config.yaml
+   `localisation`).  ncodes below is derived from this array — a mismatch
+   reads past the end and makes IDs undetectable. */
+static uint64_t codedata[30] = {
    0x00000000000027c8UL,
    0x00000000000031b6UL,
    0x0000000000003859UL,
@@ -54,14 +56,14 @@ static uint64_t codedata[22] = {
    0x00000000000051ecUL,
    0x000000000000e6f0UL,
    0x0000000000005fa4UL,
-   // 0x000000000000dd43UL,
-   // 0x0000000000001aaaUL,
-   // 0x000000000000e62fUL,
-   // 0x0000000000006dbcUL,
-   // 0x000000000000b6ebUL,
-   // 0x000000000000de10UL,
-   // 0x000000000000154dUL,
-   // 0x000000000000b57aUL,
+   0x000000000000dd43UL,
+   0x0000000000001aaaUL,
+   0x000000000000e62fUL,
+   0x0000000000006dbcUL,
+   0x000000000000b6ebUL,
+   0x000000000000de10UL,
+   0x000000000000154dUL,
+   0x000000000000b57aUL,
 };
 apriltag_family_t *tag16h5_create()
 {

@@ -129,6 +129,44 @@ sim:
     - {id: 7, x: 1.20, y: 0.80}
     - {id: 9, x: 0.60, y: 0.65}
     - {id: 12, x: 0.25, y: 0.90}
+  # Fake odometry drift, to try the localisation correction (all 0 = PX4 is perfect).
+  # The localisation tags are placed at their arena positions, which the sim
+  # takes as the real world; PX4's frame then wanders away from it like this:
+  drift_scale: 0.0             # PX4 sees (1 + this) x the real distance, e.g. 0.05 (unitless)
+  drift_rot_deg: 0.0           # PX4's frame turned this far from the real one, e.g. 3 (deg, cw +)
+  drift_x_mps: 0.0             # PX4's position creeps this fast north while airborne (m/s)
+  drift_y_mps: 0.0             # ...and east (m/s), e.g. 0.0005 = 15 cm in a 5 min flight
+
+localisation:                  # known tags for drift correction + precision landing (localisation.py)
+  enabled: true
+  # Positions in the ARENA frame, measured on the floor tiles (m): origin = centre
+  # of the home tag, x = the way the drone faces when placed on it (= PX4 x, since
+  # PX4 has no compass and starts at heading 0), y = to its right.  Place the
+  # drone square on the home tag, facing along the search length.
+  # PLACEHOLDER positions for 27 and 28: measure them on demo day.
+  home_tag_id: 29              # centre of the start box: precision landing + start/end drift fix
+  tags:
+    - {id: 29, x: 0.0, y: 0.0}   # home tag (start box centre)
+    - {id: 27, x: 3.3, y: -0.3}  # far corner, left  (y_min side), inside the search area
+    - {id: 28, x: 3.3, y: 0.8}   # far corner, right (y_max side), inside the search area
+  # Drift correction, run when the tag report is made (after the return, before
+  # landing).  Never sent to the drone: it only corrects the REPORTED tag positions.
+  model: similarity            # similarity (turn + scale + shift) | rigid (turn + shift) | translation
+                               # falls back to fewer degrees of freedom if a fit fails its checks
+  visit_gap_s: 5.0             # sightings of one tag this far apart in time are separate visits (s)
+  min_visit_sightings: 5       # a visit needs this many sightings to count as a fix (count)
+  min_span_m: 1.0              # turn/scale need fixes spread at least this far apart (m)
+  max_rms_m: 0.15              # reject a fit whose fixes disagree by more than this (m)
+  max_rotation_deg: 20.0       # reject a fit that turns the map more than this (deg)
+  max_scale_error: 0.25        # similarity: reject scale outside 1 +- this (unitless)
+  # Precision landing on the home tag: after the return the drone is moved over
+  # the tag as seen now (so drift since takeoff doesn't land it off the box).
+  precision_landing: true
+  takeoff_home_tag: true       # fly home to where the home tag was seen at takeoff, not the takeoff pose
+  land_window_s: 2.0           # use home-tag sightings from this long (s)...
+  land_min_sightings: 5        # ...and at least this many of them (count)
+  land_max_offset_m: 0.6       # ignore a home-tag position this far from the takeoff spot (m)
+  land_max_corrections: 3      # move over the tag at most this many times before landing (count)
 
 logging:
   log_dir: mission/logs        # one sub-folder per run; relative paths are from cde1302/

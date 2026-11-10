@@ -12,7 +12,10 @@ Each run gets its own folder, mission/logs/<YYYYmmdd_HHMMSS>/:
     events.csv       every event (required ones are also printed to stdout)
     trajectory.csv   drone pose at telemetry rate
     detections.csv   every accepted raw tag sighting
-    tags_final.csv   the final tag report
+    tags_final.csv   the final tag report (raw PX4 frame)
+    tags_corrected.csv  the same tags corrected by the localisation tags
+    localisation.csv    each localisation-tag visit and its fit residual
+                     (both only with localisation.enabled; localisation.py)
     uwb.csv          every UWB reading with PX4's position at that instant
                      (only when uwb.record or uwb.send_to_px4 is on)
     config_used.yaml copy of the config this run used
@@ -273,6 +276,18 @@ class MissionLog:
                     "confirmed_wall_time": None if conf is None else format_wall(self.wall_time(conf)),
                     "confirmed_mission_s": None if conf is None else self.mission_elapsed(conf),
                 })
+        finally:
+            out.close()
+        return path
+
+    def write_rows(self, name: str, fields: list[str],
+                   rows: Iterable[Mapping[str, Any]]) -> Path:
+        """Write (or overwrite) one CSV in the run folder and return its path."""
+        path = self.folder / name
+        out = _CsvFile(path, fields)
+        try:
+            for r in rows:
+                out.write(r)
         finally:
             out.close()
         return path

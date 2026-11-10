@@ -20,6 +20,10 @@ same as `planner.py --plot`.
     black star        home (takeoff)
     hollow grey square  tag candidate (not yet confirmed)
     red square + label  confirmed tag: id and (x, y)
+    hollow purple diamond  localisation tag, where it really is (config)
+    purple diamond + label localisation tag, where PX4 sees it now (the
+                        gap between the two is the drift so far)
+    purple cross      landing spot (home, or the home tag)
 
 Camera panel (live_map.show_camera): the newest frame the tag pipeline
 decoded, i.e. exactly what the detector saw, with a green outline + id per
@@ -51,6 +55,7 @@ log = logging.getLogger(__name__)
 C_AREA, C_FENCE, C_PLAN, C_NEXT = "0.45", "#d62728", "0.6", "#ff7f0e"
 C_DRONE, C_HOME, C_TAG, C_CAND = "#1f77b4", "black", "#d62728", "0.5"
 C_SEEN, C_REJECT = "#2ca02c", "#d62728"       # camera panel outlines
+C_LOC = "#9467bd"                               # localisation tags, landing spot
 
 
 class LiveMap:
@@ -107,6 +112,16 @@ class LiveMap:
         self._conf = ax.scatter([], [], marker="s", s=90, color=C_TAG, zorder=7,
                                 label="confirmed tag")
         self.tag_labels: dict[int, object] = {}
+        loc = settings.localisation
+        refs = [[t.y, t.x] for t in loc.tags] if loc.enabled else []
+        self._loc_ref = ax.scatter(*zip(*refs) if refs else ([], []), marker="D", s=70,
+                                   facecolors="none", edgecolors=C_LOC, zorder=4,
+                                   label="localisation tag (known)")
+        self._loc_seen = ax.scatter([], [], marker="D", s=60, color=C_LOC, zorder=7,
+                                    label="localisation tag (seen)")
+        (self._land,) = ax.plot([], [], "x", color=C_LOC, ms=12, mew=2, zorder=8,
+                                label="landing spot")
+        self.loc_labels: dict[int, object] = {}
 
         ax.set_xlabel("East, y (m)")
         ax.set_ylabel("North, x (m)")
@@ -290,11 +305,29 @@ class LiveMap:
             self._next.set_data([], [])
 
         self._draw_tags(snap)
+        self._draw_loc(snap)
         if self._bounds != before:
             self._apply_bounds()
 
         self._title.set_text(self._title_text(snap))
         self._status.set_text(self._status_text(snap))
+
+    def _draw_loc(self, snap: StateSnapshot) -> None:
+        for m in snap.loc_tags:
+            self._grow(m.ref_x, m.ref_y)
+        seen = [m for m in snap.loc_tags if m.x is not None]
+        self._loc_seen.set_offsets([[m.y, m.x] for m in seen] if seen else [[math.nan, math.nan]])
+        for m in seen:
+            text = f" L{m.tag_id}"
+            label = self.loc_labels.get(m.tag_id)
+            if label is None:
+                self.loc_labels[m.tag_id] = self.ax.annotate(
+                    text, (m.y, m.x), textcoords="offset points", xytext=(7, 4),
+                    fontsize=8, color=C_LOC, weight="bold", zorder=8)
+            else:
+                label.xy = (m.y, m.x)
+        lt = snap.land_target
+        self._land.set_data(([lt[1]], [lt[0]]) if lt else ([], []))
 
     def _draw_tags(self, snap: StateSnapshot) -> None:
         cand = [t for t in snap.tags if not t.confirmed]

@@ -17,7 +17,7 @@ Per ID, every time a sighting arrives:
    CONFIRMED the first time support >= min_sightings; on_confirm fires once.
 
 The estimate keeps improving after confirmation as more sightings arrive.
-tag16h5 has only 22 codes, so occasional wrong-ID detections happen: a
+tag16h5 has only 30 codes, so occasional wrong-ID detections happen: a
 single (or scattered) false sighting never gets enough support to confirm.
 """
 
