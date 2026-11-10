@@ -192,6 +192,12 @@ class LiveMap:
 @dataclass(frozen=True)
 class Uwb:
     send_to_px4: bool = False
+    ground_frame: bool = False         # PX4 snaps onto UWB on the ground, before takeoff
+    nose_deg: float = 0.0              # nose at PX4 power-up, deg from UWB +x towards +y
+    snap_tol_m: float = 0.15           # PX4 must sit this close to UWB before takeoff (m)
+    snap_hold_s: float = 2.0           # ...for this long (s)
+    snap_timeout_s: float = 20.0       # give up (no takeoff) after this (s)
+    frame_warn_m: float = 0.30         # in flight: warn when PX4 and UWB differ by more (m)
     record: bool = False
     debug_port: int = 5010
     max_start_jump_m: float = 0.30
@@ -421,6 +427,10 @@ def validate(s: Settings) -> None:
               "align_max_rms_m", "align_outlier_k", "max_start_jump_m",
               "align_solve_period_s", "align_max_px4_age_ms")
     _check(1 <= u.debug_port <= 65535, f"uwb.debug_port out of range (got {u.debug_port})")
+    _check(not (u.ground_frame and u.send_to_px4),
+           "uwb.ground_frame and uwb.send_to_px4 are two different methods: turn one off")
+    _positive(u, "uwb", "snap_tol_m", "snap_hold_s", "snap_timeout_s", "frame_warn_m")
+    _check(-360.0 <= u.nose_deg <= 360.0, f"uwb.nose_deg must be -360..360 (got {u.nose_deg})")
     _non_negative(u, "uwb", "align_min_spread_ratio")
     _check(u.align_mirror_margin >= 1.0,
            f"uwb.align_mirror_margin must be >= 1 (got {u.align_mirror_margin})")

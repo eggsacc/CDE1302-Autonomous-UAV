@@ -247,3 +247,89 @@ def test_without_a_feed_nothing_changes(tmp_path):
     fly_until_exploring(r)
     r.finish()
     assert r.drone.uwb_alignments == [] and not r.events("UWB_ALIGNED")
+
+
+# ---------------------------------------------------------------------------
+# uwb.ground_frame: PX4 moves onto UWB on the ground, then takes off
+# ---------------------------------------------------------------------------
+
+def test_latest_needs_only_an_xy_fix():
+    # The module often has no z fix (eop.z 2.55) while x and y are good.
+    frame = bytearray(node_frame2(pos=(1.0, 2.0, -1.0)))
+    frame[12] = 255                                      # eop.z byte = 2.55 m
+    frame[-1] = sum(frame[:-1]) & 0xFF                   # fix the checksum
+    rec = UwbRecord(0, (0.3, 0.4, -0.5, 0.0), 20, bytes(frame))
+    feed = UwbFeed(load_settings())
+    feed.feed_datagram(build_packet(2, 0, 0, {}, [rec]))
+    assert feed.latest() is not None and feed.latest().uy == pytest.approx(2.0)
+
+
+class FrameFeed(FakeFeed):
+    """PX4 sits at (0, 0) until the drone has been sent an alignment, then on UWB."""
+
+    def __init__(self, ux=1.0, uy=2.0, snaps=True):
+        super().__init__()
+        self.ux, self.uy, self.snaps, self.drone = ux, uy, snaps, None
+
+    def latest(self):
+        if self.snaps and self.drone is not None and self.drone.uwb_alignments:
+            px, py = self.drone.uwb_alignments[-1].to_px4(self.ux, self.uy)
+        else:
+            px, py = 0.0, 0.0
+        return AlignSample(0.0, self.ux, self.uy, px, py)
+
+
+def frame_rig(tmp_path, feed, **uwb):
+    r = Rig(configure(tmp_path, flight={"stop_when_all_found": False},
+                      uwb={"ground_frame": True, "send_to_px4": False, **uwb}), uwb=feed)
+    feed.drone = r.drone
+    r.until(lambda: r.m.phase == Phase.READY, 5)
+    return r
+
+
+def starts(r):
+    return [c for c in r.drone.commands if c[1] == "CMD_START"]
+
+
+@pytest.mark.parametrize("nose_deg", [0.0, -90.0])
+def test_ground_frame_snaps_before_takeoff(tmp_path, nose_deg):
+    feed = FrameFeed()
+    r = frame_rig(tmp_path, feed, nose_deg=nose_deg)
+    r.m.command("takeoff")
+    r.step()
+    assert r.drone.uwb_alignments and not starts(r)          # alignment first, no START yet
+    a = r.drone.uwb_alignments[0]
+    assert (math.degrees(a.theta), a.mirror, a.tx, a.ty) == (pytest.approx(nose_deg), True, 0, 0)
+    assert r.until(lambda: starts(r), 5)
+    assert r.events("UWB_FRAME_READY") and r.m.phase == Phase.TAKING_OFF
+    # nose 0: PX4 x = UWB x, PX4 y = -UWB y
+    if nose_deg == 0.0:
+        assert a.to_px4(1.0, 2.0) == (pytest.approx(1.0), pytest.approx(-2.0))
+    assert r.until(lambda: r.m.phase == Phase.EXPLORING, 60)
+    r.m.abort("test over", exit_code=0)
+    r.finish()
+
+
+def test_ground_frame_does_not_take_off_if_px4_never_moves(tmp_path):
+    r = frame_rig(tmp_path, FrameFeed(snaps=False), snap_timeout_s=3.0)
+    r.m.command("takeoff")
+    assert r.until(lambda: any("did not move onto UWB" in e["details"]
+                               for e in r.events("ERROR")), 10)
+    assert not starts(r) and r.m.phase == Phase.READY
+    assert len(r.drone.uwb_alignments) >= 2                  # resent while waiting
+
+
+def test_ground_frame_refuses_takeoff_without_uwb(tmp_path):
+    feed = FrameFeed()
+    feed.latest = lambda: None
+    r = frame_rig(tmp_path, feed)
+    r.m.command("takeoff")
+    for _ in range(30):
+        r.step()
+    assert not starts(r) and not r.drone.uwb_alignments and r.m.phase == Phase.READY
+
+
+def test_ground_frame_and_in_flight_alignment_are_exclusive(tmp_path):
+    from settings import ConfigError, validate
+    with pytest.raises(ConfigError, match="ground_frame"):
+        validate(configure(tmp_path, uwb={"ground_frame": True, "send_to_px4": True}))

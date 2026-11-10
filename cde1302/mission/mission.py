@@ -49,6 +49,14 @@ With uwb.send_to_px4, UWB/PX4 position pairs are collected during the sweep
 (uwb_feed.py).  Once they give a good alignment it is sent to the drone, which
 feeds PX4 from then on.  A sweep with no alignment simply flies on without UWB.
 
+With uwb.ground_frame (the other UWB method, from laptop/simple_uwb_frame_goal.py
+on uwb-testing) the UWB anchors ARE the coordinate system from the ground up:
+on `takeoff` the laptop first sends a rotation-only alignment (uwb.nose_deg,
+mirror, no offset), PX4 moves its position onto UWB, and only once PX4 has sat
+within uwb.snap_tol_m of UWB for uwb.snap_hold_s is CMD_START sent.  From then
+on PX4 x = UWB x and PX4 y = -UWB y (nose_deg 0), so home, the sweep, the return
+and every tag are in anchor coordinates and do not drift.
+
 The main loop is a fixed-rate, non-blocking Mission.tick(), so a GUI timer
 (the future live map) can drive it instead of run().
 """
@@ -84,6 +92,7 @@ from settings import Area, ConfigError, DEFAULT_CONFIG_PATH, Settings, load_sett
 from sighting import Sighting
 from tag_map import TagEstimate, TagMap
 from trajectory import Trajectory, build_trajectory, shift_for_camera
+from uwb_align import Alignment
 
 log = logging.getLogger("mission")
 
@@ -197,6 +206,18 @@ class Mission:
         self._uwb_reason = ""
         self._uwb_acks = 0                       # ESP32's align_received when we first sent
         self._uwb_confirmed = False
+        u = settings.uwb
+        # uwb.ground_frame: PX4's frame = the UWB frame, rotation only, no offset.
+        # The mirror flips UWB y first, which flips the sign of the nose angle.
+        mirror = u.mirror != "no"
+        self.frame_alignment: Optional[Alignment] = (
+            Alignment(math.radians(u.nose_deg if mirror else -u.nose_deg), mirror, 0.0, 0.0)
+            if u.ground_frame else None)
+        self._snap_t0: Optional[float] = None    # waiting for PX4 to move onto UWB
+        self._snap_good_since: Optional[float] = None
+        self._snap_next_send = 0.0
+        self._snap_err = math.inf
+        self._frame_next = 0.0
         self.waypoints = list(waypoints)
         self.auto = auto
         self.dry_run = drone.dry_run
@@ -284,6 +305,10 @@ class Mission:
             elif cmd == "takeoff":
                 if self.dry_run:
                     log.warning("takeoff: --dry-run never sends flight commands")
+                elif self.phase == Phase.READY and self._snap_t0 is not None:
+                    log.warning("takeoff: already waiting for PX4 to move onto UWB")
+                elif self.phase == Phase.READY and self.frame_alignment is not None:
+                    self._begin_snap(now)
                 elif self.phase == Phase.READY:
                     self._takeoff(now)
                 else:
@@ -370,10 +395,71 @@ class Mission:
             self._set_phase(Phase.DONE, "connect timeout")
 
     def _tick_ready(self, now: float) -> None:
+        if self._snap_t0 is not None:
+            self._tick_snap(now)
         if now >= self._next_status:
             self._next_status = now + self.settings.logging.status_period_s
             if self.dry_run:
                 log.info(self.status_line(now))
+
+    # -- uwb.ground_frame: PX4 onto UWB before takeoff ----------------------
+
+    def _frame_error(self) -> Optional[float]:
+        """Distance between PX4's position and UWB in PX4's frame (m), from the
+        newest UWB reading and the PX4 position paired with it on the drone."""
+        s = self.uwb.latest() if self.uwb is not None else None
+        if s is None:
+            return None
+        return math.dist(self.frame_alignment.to_px4(s.ux, s.uy), (s.px, s.py))
+
+    def _begin_snap(self, now: float) -> None:
+        if self.uwb is None or self.uwb.latest() is None:
+            log.error("takeoff refused: no usable UWB reading (uwb.ground_frame). UWB and "
+                      "its debug stream on in the firmware? anchors up? firewall on UDP %d?",
+                      self.settings.uwb.debug_port)
+            return
+        s = self.uwb.latest()
+        a = self.frame_alignment
+        self._snap_t0, self._snap_good_since, self._snap_next_send = now, None, now
+        self.log.event("UWB_FRAME_SNAP", f"on the ground at UWB ({s.ux:.2f}, {s.uy:.2f}); "
+                       f"sending the UWB frame (nose {self.settings.uwb.nose_deg:.0f} deg, "
+                       f"theta {math.degrees(a.theta):.0f} deg, mirror {a.mirror})")
+
+    def _tick_snap(self, now: float) -> None:
+        u = self.settings.uwb
+        if now >= self._snap_next_send:          # resend: UDP, and the ESP may still be getting READY
+            self.drone.send_uwb_align(self.frame_alignment)
+            self._snap_next_send = now + 2.0
+        err = self._frame_error()
+        self._snap_err = math.inf if err is None else err
+        if err is not None and err <= u.snap_tol_m:
+            self._snap_good_since = self._snap_good_since or now
+            if now - self._snap_good_since >= u.snap_hold_s:
+                self._snap_t0 = None
+                s = self.uwb.latest()
+                self.log.event("UWB_FRAME_READY", f"PX4 sits {err:.2f} m from UWB; takeoff at "
+                               f"UWB ({s.ux:.2f}, {s.uy:.2f}) = PX4 ({s.px:.2f}, {s.py:.2f})")
+                self._takeoff(now)
+                return
+        else:
+            self._snap_good_since = None
+        if now - self._snap_t0 > u.snap_timeout_s:
+            self._snap_t0 = None
+            self.log.event("ERROR", f"PX4 did not move onto UWB within {u.snap_timeout_s:.0f} s "
+                           f"(last {self._snap_err:.2f} m off; need {u.snap_tol_m:.2f} m). "
+                           "Not taking off. Check EKF2_EV_CTRL = 1, CONFIG_UWB_SEND_TO_PX4 and "
+                           "the UWB fix, then type `takeoff` again")
+
+    def _check_frame(self, now: float) -> None:
+        """uwb.ground_frame, in the air: warn when PX4 leaves UWB (UWB lost or rejected)."""
+        if self.frame_alignment is None or self.phase not in AIRBORNE or now < self._frame_next:
+            return
+        err = self._frame_error()
+        if err is not None and err > self.settings.uwb.frame_warn_m:
+            self.log.event("UWB_FRAME_OFF", f"PX4 is {err:.2f} m from UWB")
+            self._frame_next = now + 5.0
+        else:
+            self._frame_next = now + 1.0
 
     def _takeoff(self, now: float) -> None:
         pose = self.drone.latest_pose()
@@ -488,6 +574,7 @@ class Mission:
 
     def _tick_uwb(self, now: float) -> None:
         """uwb.send_to_px4: during the sweep, solve the alignment and deliver it."""
+        self._check_frame(now)
         if (self.uwb is None or not self.settings.uwb.send_to_px4
                 or self.phase != Phase.EXPLORING or self._uwb_confirmed
                 or now < self._uwb_next):
@@ -816,6 +903,11 @@ class Mission:
                          f"({format_wall(self.log.wall_time(e.first_seen_t))})")
         if not tags:
             lines.append("   (no tags confirmed)")
+        elif self.frame_alignment is not None:
+            lines.append("In UWB coordinates (m from anchor A0, as NAssistant shows):")
+            for e in tags:
+                ux, uy = self.frame_alignment.to_uwb(e.x, e.y)
+                lines.append(f"{e.tag_id:>4} {ux:>8.3f} {uy:>8.3f}")
         text = "\n".join(lines)
         self._echo(text)
         path = self.log.write_tags_final(self.tag_map.final_rows())
@@ -873,7 +965,8 @@ def build(settings: Settings, *, sim: bool = False, dry_run: bool = False,
         from tag_pipeline import TagPipeline
         drone = DroneLink(settings, dry_run=dry_run, clock=clock, on_command=on_command)
         source = TagPipeline(settings, drone, lambda: drone.esp_ip, on_sighting, clock=clock)
-        if (settings.uwb.send_to_px4 and not dry_run) or settings.uwb.record:
+        if (((settings.uwb.send_to_px4 or settings.uwb.ground_frame) and not dry_run)
+                or settings.uwb.record):
             from uwb_feed import UwbFeed
             uwb = UwbFeed(settings, on_reading=(lambda **f: mlog.uwb(mlog.now(), **f))
                           if settings.uwb.record else None)

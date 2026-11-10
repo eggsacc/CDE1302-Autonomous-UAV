@@ -13,8 +13,8 @@ drone_id: 2              # ESP32 CONFIG_DRONE_ID; drone IP = 192.168.1.(200 + id
 # Search area. PLACEHOLDER numbers: replace with the real area on demo day.
 area:
   x_min: 0.0             # m
-  x_max: 3.5             # m
-  y_min: -0.5             # m
+  x_max: 5.0             # m
+  y_min: -1.35             # m
   y_max: 1.0             # m
   margin: 0.0            # keep waypoints this far inside the edges (m)
 
@@ -149,6 +149,15 @@ uwb:                           # LinkTrack UWB -> PX4 alignment (mission/uwb_ali
   record: true                 # save every UWB reading to uwb.csv in the flight log, also when not
                                # sent to PX4 (for tools/compare_flights.py). Uses UDP 5010, so
                                # uwb_sniff.py and uwb_px4_bench.py can't run during a mission
+  ground_frame: false          # UWB anchors as the coordinate system from the ground: on `takeoff`,
+                               # PX4 first moves onto UWB, then takes off. Needs CONFIG_UWB_SEND_TO_PX4
+                               # and EKF2_EV_CTRL 1. Not together with send_to_px4. See UWB_GROUND_FRAME.md
+  nose_deg: 0.0                # ground_frame: drone's nose at PX4 POWER-UP, deg from UWB +x towards +y.
+                               # 0 = along +x (A0 -> A3 usually), 90 = +y, 180 = -x, -90 = -y
+  snap_tol_m: 0.15             # ground_frame: PX4 must sit this close to UWB before takeoff... (m)
+  snap_hold_s: 2.0             # ...for this long (s)
+  snap_timeout_s: 20.0         # ...or no takeoff after this (s)
+  frame_warn_m: 0.30           # ground_frame, in flight: log UWB_FRAME_OFF if PX4 and UWB differ more (m)
   debug_port: 5010             # UDP port of the drone's debug stream (CONFIG_UWB_DEBUG_PORT)
   max_start_jump_m: 0.30       # don't send an alignment that would move PX4's position more than this (m)
   align_solve_period_s: 1.0    # how often to try solving during the sweep (s)

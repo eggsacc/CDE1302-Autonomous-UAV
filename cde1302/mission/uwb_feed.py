@@ -23,11 +23,12 @@ writes them to uwb.csv), including flights that never send UWB to PX4.
 from __future__ import annotations
 
 import logging
+import math
 import socket
 import threading
 from typing import Callable, Optional
 
-from nlink import NLinkParser, decode
+from nlink import EOP_NO_FIX, INVALID_COORD, NLinkParser, decode
 from settings import Settings
 from uwb_align import AlignmentEstimator, AlignResult, AlignSample
 from uwb_link import LinkStats, UwbDebugPacket, parse_packet
@@ -36,6 +37,14 @@ log = logging.getLogger("uwb_feed")
 
 RECV_TIMEOUT_S = 0.2            # how often the thread checks for stop()
 RECV_BUFFER = 2048              # larger than UWB_DBG_MAX_PACKET
+
+
+def xy_fix(pos, eop) -> bool:
+    """A usable horizontal position: x and y valid with a real precision.  z is
+    ignored, as in the firmware (uwb_reading_usable): the module often reports
+    no z fix (eop 2.55) while x and y are good."""
+    return (all(math.isfinite(v) and v != INVALID_COORD for v in pos[:2])
+            and max(eop[:2]) < EOP_NO_FIX)
 
 
 class UwbFeed:
@@ -123,7 +132,7 @@ class UwbFeed:
             return
         sample = AlignSample(rec.esp_time_us / 1e6, obj.pos[0], obj.pos[1],
                              rec.px4[0], rec.px4[1], obj.pos_valid, max(obj.eop))
-        if sample.has_fix:
+        if xy_fix(obj.pos, obj.eop):
             self._latest = sample
         if self._collecting:
             self.estimator.add(sample)

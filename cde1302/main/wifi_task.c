@@ -165,7 +165,8 @@ static void handle_command(const wifi_cmd_pkt_t *cmd)
         }
         s_phase = MISSION_BUSY;   /* one START per flight */
         s_start_requested = true;
-        uwb_clear_alignment();    /* never fly on a previous flight's alignment */
+        /* The UWB alignment is kept: it may have been sent on the ground for
+         * this flight (uwb.ground_frame).  main.c clears it before each READY. */
         ESP_LOGI(TAG, "CMD_START");
         break;
     case CMD_GOTO:
