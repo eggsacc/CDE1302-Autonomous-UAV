@@ -1,0 +1,6 @@
+numpy
+pandas
+matplotlib
+PyYAML
+python-docx
+pyulog        # Section 5 (ULog analysis), not needed yet

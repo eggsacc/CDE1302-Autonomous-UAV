@@ -29,6 +29,7 @@ flexible. The redesign is in `mechanical/`; its source repo is
 | `mechanical/` | Frame redesign: `README.md` (design notes + print guide), `STEP/`, `STLs/`, `assets/` | ours |
 | `electrical/` | Hardware architecture, wiring, network | ours |
 | `UWB_documentation/` | LinkTrack UWB datasheets | reference only |
+| `report/` | Final report (generated .docx), its scripts, figures and copies of the 3 demo-flight logs. **Read `report/AGENT_NOTES.md` first** | ours |
 
 ## Documentation rules (from the user)
 
