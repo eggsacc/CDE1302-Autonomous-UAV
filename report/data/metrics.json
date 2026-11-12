@@ -22,6 +22,8 @@
       "t_home_s": 65.453,
       "t_landing_s": 75.766,
       "t_done_s": 81.891,
+      "t_land_cmd_s": 75.562,
+      "mission_time_s": 75.562,
       "sweep_duration_s": 47.828,
       "return_duration_s": 5.375,
       "settle_duration_s": 10.313000000000002,
@@ -277,233 +279,8 @@
       "land_cmd_reason": "CMD_LAND sent (search complete, still correcting after 10 s (3 cm from the home tag))"
     },
     {
-      "id": "truncated-exploration-1",
-      "name": "Run 2: truncated sweep",
-      "mpc_xy_vel_max": 1.0,
-      "cap_confirmed": false,
-      "lane_spacing_m": 3,
-      "n_lanes": 2,
-      "n_waypoints": 4,
-      "align_deg": 4.95,
-      "home_tag_px4": [
-        -0.035,
-        0.072
-      ],
-      "t_hover_s": 8.484,
-      "t_hover_confirmed_s": 16.047,
-      "t_explore_s": 16.047,
-      "t_sweep_start_s": 16.641,
-      "t_sweep_end_s": 33.766,
-      "t_return_s": 33.766,
-      "t_home_s": 37.156,
-      "t_landing_s": 41.953,
-      "t_done_s": 48.203,
-      "sweep_duration_s": 17.125,
-      "return_duration_s": 3.3900000000000006,
-      "settle_duration_s": 4.797000000000004,
-      "sweep_path_m": 10.724938499349868,
-      "plan_path_m": 8.78,
-      "flight_path_m": 14.158438110177658,
-      "speed_mean_mps": 0.6262737809839339,
-      "speed_cruise_median_mps": 0.6978470050226611,
-      "speed_p95_mps": 0.7807906238052156,
-      "speed_max_mps": 0.8358661884167469,
-      "heading_min_deg": -3.4606650825901726,
-      "heading_max_deg": 1.501149423242757,
-      "sweep_heading_min_deg": -0.590146528984748,
-      "sweep_heading_max_deg": 1.1860226359208041,
-      "telemetry_dt_median_s": 0.0940000000000012,
-      "telemetry_dt_max_s": 0.21799999999999642,
-      "lanes": [
-        {
-          "lane": 1,
-          "length_m": 3.08,
-          "duration_s": 4.390000000000001,
-          "xt_rms_m": 0.05649073635343543,
-          "xt_max_m": 0.11578254549853952,
-          "xt_mean_m": -0.04196346756226113,
-          "overshoot_m": 0.1657283335381156
-        },
-        {
-          "lane": 2,
-          "length_m": 3.0799999999999996,
-          "duration_s": 4.859000000000002,
-          "xt_rms_m": 0.15764612210363466,
-          "xt_max_m": 0.20206229256733577,
-          "xt_mean_m": -0.15217161870372353,
-          "overshoot_m": 0.0
-        }
-      ],
-      "xt_rms_all_m": 0.11841347707940054,
-      "xt_max_all_m": 0.20206229256733577,
-      "overshoot_max_m": 0.1657283335381156,
-      "tags": [
-        {
-          "tag_id": 2,
-          "raw_x": 1.4137,
-          "raw_y": -1.2015,
-          "corr_x": 1.4058,
-          "corr_y": -1.2753,
-          "shift_m": 0.0742,
-          "n_sightings": 19,
-          "first_seen_s": 18.859,
-          "confirmed_s": 19.297,
-          "confirm_delay_s": 0.43799999999999883,
-          "seen_for_s": 1.9670000000000023,
-          "speed_while_seen_mps": 0.6047596292794669,
-          "decision_margin_median": 104.2686,
-          "range_median_m": 0.7416588231794994
-        },
-        {
-          "tag_id": 4,
-          "raw_x": 2.8144,
-          "raw_y": -1.1794,
-          "corr_x": 2.783,
-          "corr_y": -1.3265,
-          "shift_m": 0.1505,
-          "n_sightings": 12,
-          "first_seen_s": 21.547,
-          "confirmed_s": 21.891,
-          "confirm_delay_s": 0.34399999999999764,
-          "seen_for_s": 1.171000000000003,
-          "speed_while_seen_mps": 0.7513321214915644,
-          "decision_margin_median": 101.1596,
-          "range_median_m": 0.7331290850439958
-        },
-        {
-          "tag_id": 6,
-          "raw_x": 4.1682,
-          "raw_y": 1.3088,
-          "corr_x": 4.1092,
-          "corr_y": 0.8928,
-          "shift_m": 0.4201,
-          "n_sightings": 24,
-          "first_seen_s": 27.469,
-          "confirmed_s": 27.844,
-          "confirm_delay_s": 0.375,
-          "seen_for_s": 2.437000000000001,
-          "speed_while_seen_mps": 0.5588552373625514,
-          "decision_margin_median": 101.87084999999999,
-          "range_median_m": 0.7624973219501772
-        }
-      ],
-      "all_tags_confirmed_s": 27.844,
-      "all_tags_after_sweep_start_s": 11.203000000000003,
-      "detections_total": 309,
-      "detections_by_id": {
-        "29": 211,
-        "6": 24,
-        "22": 19,
-        "2": 19,
-        "4": 12,
-        "24": 10,
-        "25": 9,
-        "23": 5
-      },
-      "loc_ids_configured": [
-        29,
-        25,
-        23,
-        22,
-        24
-      ],
-      "loc_ids_fixed": [
-        22,
-        23,
-        24,
-        25,
-        29
-      ],
-      "loc_visits": [
-        {
-          "tag_id": 29,
-          "visit": 1,
-          "n_sightings": 129,
-          "px4_x": -0.0335,
-          "px4_y": 0.073,
-          "ref_x": 0.0,
-          "ref_y": 0.0,
-          "raw_err_m": 0.0803196738041185,
-          "residual_m": 0.0845
-        },
-        {
-          "tag_id": 25,
-          "visit": 1,
-          "n_sightings": 9,
-          "px4_x": 2.302,
-          "px4_y": -0.81,
-          "ref_x": 2.3,
-          "ref_y": -0.92,
-          "raw_err_m": 0.11001818031580053,
-          "residual_m": 0.1432
-        },
-        {
-          "tag_id": 22,
-          "visit": 1,
-          "n_sightings": 19,
-          "px4_x": 4.2142,
-          "px4_y": -1.0703,
-          "ref_x": 4.14,
-          "ref_y": -1.38,
-          "raw_err_m": 0.3184646448194838,
-          "residual_m": 0.058
-        },
-        {
-          "tag_id": 24,
-          "visit": 1,
-          "n_sightings": 10,
-          "px4_x": 4.236,
-          "px4_y": 0.3774,
-          "ref_x": 4.14,
-          "ref_y": 0.0,
-          "raw_err_m": 0.38941848954563013,
-          "residual_m": 0.0442
-        },
-        {
-          "tag_id": 23,
-          "visit": 1,
-          "n_sightings": 5,
-          "px4_x": 2.3493,
-          "px4_y": 0.8526,
-          "ref_x": 2.3,
-          "ref_y": 0.46,
-          "raw_err_m": 0.39568326980048074,
-          "residual_m": 0.1267
-        },
-        {
-          "tag_id": 29,
-          "visit": 2,
-          "n_sightings": 60,
-          "px4_x": 0.0707,
-          "px4_y": 0.2055,
-          "ref_x": 0.0,
-          "ref_y": 0.0,
-          "raw_err_m": 0.2173217430447308,
-          "residual_m": 0.0977
-        }
-      ],
-      "loc_raw_err_mean_m": 0.25187100022170744,
-      "loc_raw_err_max_m": 0.39568326980048074,
-      "loc_fit": {
-        "turn_deg": -2.44,
-        "scale": 0.9777,
-        "shift_x": 0.01,
-        "shift_y": -0.155,
-        "rms_m": 0.099,
-        "n_fixes": 6,
-        "loo_global_cm": 14.4,
-        "loo_time_cm": 10.0,
-        "loo_hybrid_cm": 6.9
-      },
-      "land_targets": 2,
-      "land_first_offset_cm": 23.0,
-      "land_correction_moves": 2,
-      "land_final_offset_cm": 2.0,
-      "land_cmd_reason": "CMD_LAND sent (search complete, 2 cm from the home tag)"
-    },
-    {
       "id": "truncated-exploration-2",
-      "name": "Run 3: truncated sweep",
+      "name": "Run 2: truncated sweep",
       "mpc_xy_vel_max": 1.5,
       "cap_confirmed": true,
       "lane_spacing_m": 3,
@@ -523,6 +300,8 @@
       "t_home_s": 26.016,
       "t_landing_s": 36.344,
       "t_done_s": 42.375,
+      "t_land_cmd_s": 36.141,
+      "mission_time_s": 36.141,
       "sweep_duration_s": 10.953,
       "return_duration_s": 2.155999999999999,
       "settle_duration_s": 10.328000000000003,
@@ -692,44 +471,44 @@
   "dispersion": {
     "2": {
       "raw": {
-        "mean_x": 1.3054,
-        "mean_y": -1.2556,
-        "rms_from_mean_m": 0.11632345707838408,
-        "max_pairwise_m": 0.23905083141457592
+        "mean_x": 1.25125,
+        "mean_y": -1.28265,
+        "rms_from_mean_m": 0.09646214283334159,
+        "max_pairwise_m": 0.19292428566668318
       },
       "corr": {
-        "mean_x": 1.3561666666666667,
-        "mean_y": -1.3214,
-        "rms_from_mean_m": 0.048197049241167765,
-        "max_pairwise_m": 0.10791895106977265
+        "mean_x": 1.33135,
+        "mean_y": -1.34445,
+        "rms_from_mean_m": 0.0065517173321199,
+        "max_pairwise_m": 0.013103434664239801
       }
     },
     "4": {
       "raw": {
-        "mean_x": 2.6995333333333336,
-        "mean_y": -1.2643666666666669,
-        "rms_from_mean_m": 0.1378389801342293,
-        "max_pairwise_m": 0.319006598677833
+        "mean_x": 2.6421,
+        "mean_y": -1.30685,
+        "rms_from_mean_m": 0.1148438613945039,
+        "max_pairwise_m": 0.2296877227890078
       },
       "corr": {
-        "mean_x": 2.763866666666667,
-        "mean_y": -1.3613666666666664,
-        "rms_from_mean_m": 0.0332980146221629,
-        "max_pairwise_m": 0.07283577417725441
+        "mean_x": 2.7542999999999997,
+        "mean_y": -1.3788,
+        "rms_from_mean_m": 0.02183597948341211,
+        "max_pairwise_m": 0.04367195896682422
       }
     },
     "6": {
       "raw": {
-        "mean_x": 4.102,
-        "mean_y": 1.1563666666666668,
-        "rms_from_mean_m": 0.16309807547062657,
-        "max_pairwise_m": 0.3860436503816632
+        "mean_x": 4.0689,
+        "mean_y": 1.08015,
+        "rms_from_mean_m": 0.13851968271693377,
+        "max_pairwise_m": 0.27703936543386753
       },
       "corr": {
-        "mean_x": 4.183833333333333,
-        "mean_y": 0.9801666666666667,
-        "rms_from_mean_m": 0.10619298993394569,
-        "max_pairwise_m": 0.256073993212899
+        "mean_x": 4.22115,
+        "mean_y": 1.02385,
+        "rms_from_mean_m": 0.08374440279803792,
+        "max_pairwise_m": 0.16748880559607585
       }
     }
   }

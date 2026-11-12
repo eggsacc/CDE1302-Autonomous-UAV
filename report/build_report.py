@@ -6,7 +6,9 @@ Build the CDE1302 final report (Word .docx) from the analysed flight data.
     python report/build_report.py        # then:  CDE1302_Final_Report_DRAFT.docx
 
 Formatting (set by the team): academic formal, Times New Roman, no text
-smaller than 12 pt.  Unfinished items are marked in the text as
+smaller than 12 pt; single spacing; AT MOST 10 PAGES including the cover
+(course rule); standalone (no repository paths, file
+or branch names in the text).  Unfinished items are marked in the text as
     [TO BE COMPLETED: ...]   yellow highlight
     [Image placeholder] ...  shaded box (images are added by hand)
 so they can be found with Ctrl+F.  See report/AGENT_NOTES.md before editing.
@@ -30,7 +32,7 @@ ROOT = Path(__file__).resolve().parent
 FIG = ROOT / "figures"
 OUT = ROOT / "CDE1302_Final_Report_DRAFT.docx"
 METRICS = json.loads((ROOT / "data" / "metrics.json").read_text(encoding="utf-8"))
-R1, R2, R3 = METRICS["runs"]
+R1, R2 = METRICS["runs"]
 DISP = METRICS["dispersion"]
 
 FONT = "Times New Roman"
@@ -41,12 +43,8 @@ TEXT_WIDTH_CM = 15.9          # A4 minus 2 x 2.54 cm margins
 # ---------------------------------------------------------------------------
 # Figure / table numbering (declared up front so the text can cite them)
 # ---------------------------------------------------------------------------
-FIGS = ["drone", "arch", "control", "states", "lawnmower", "projection", "livemap",
-        "timeline", "path1", "path2", "path3", "speed", "sightings", "repeat", "loc",
-        "ulog_track", "ulog_att", "ulog_ekf", "frame", "frame_sim", "wiring", "uwb_setup"]
-TABS = ["hw", "links", "states", "safety", "gate_modes", "filters", "loc_params",
-        "runs", "timeline", "tracking", "tags", "positions", "locfit", "landing",
-        "ulog_params", "ulog_plan", "frame", "uwb_params", "uwb_cmp", "config"]
+FIGS = ["arch", "path1", "odom_div"]
+TABS = ["hw", "params", "summary", "positions"]
 
 
 def F(key):
@@ -165,7 +163,7 @@ def add_rich(p, text, size=BODY_PT, base_bold=False, base_italic=False):
             set_font(r, size, bold=True, italic=base_italic)
         elif part.startswith("`") and part.endswith("`"):
             r = p.add_run(part[1:-1])
-            set_font(r, size, mono=True, bold=base_bold)
+            set_font(r, size, bold=base_bold)   # course rule: Times New Roman only
         elif (part.startswith("[TO BE COMPLETED") or part.startswith("[TO CONFIRM")
               or part == "[TBC]"):
             r = p.add_run(part)
@@ -199,12 +197,12 @@ class Report:
         normal = st["Normal"]
         style_font(normal, BODY_PT)
         pf = normal.paragraph_format
-        pf.line_spacing_rule = WD_LINE_SPACING.ONE_POINT_FIVE
+        pf.line_spacing_rule = WD_LINE_SPACING.SINGLE
         pf.space_after = Pt(6)
         pf.space_before = Pt(0)
-        for name, size, before, after, italic in (("Heading 1", 16, 24, 12, False),
-                                                  ("Heading 2", 14, 18, 6, False),
-                                                  ("Heading 3", 12, 12, 6, True)):
+        for name, size, before, after, italic in (("Heading 1", 16, 14, 6, False),
+                                                  ("Heading 2", 14, 10, 4, False),
+                                                  ("Heading 3", 12, 8, 4, True)):
             h = st[name]
             style_font(h, size, bold=True, italic=italic)
             h.paragraph_format.space_before = Pt(before)
@@ -233,7 +231,7 @@ class Report:
         add_field(fp, "PAGE", "1")
 
     # -- block elements -----------------------------------------------------
-    def h1(self, text, page_break=True):
+    def h1(self, text, page_break=False):
         if page_break:
             self.page_break()
         return self.doc.add_heading(text, level=1)
@@ -405,10 +403,22 @@ class Report:
 # ---------------------------------------------------------------------------
 # Content
 # ---------------------------------------------------------------------------
+# Course rules: at most 10 pages including the cover (and any appendix), single
+# spacing, Times New Roman >= 12 pt, GitHub link in the report, and these
+# points: architecture and data/control flow; exploration and navigation;
+# AprilTag detection and localisation; important parameters and decisions;
+# results; AI-assisted flight-data analysis; limitations and improvements.
+# The text is standalone: no repo paths, file names, branches or config keys.
+
+REPO_URL = "https://github.com/eggsacc/CDE1302-Autonomous-UAV"
+
+
+def run_label(r):
+    return r["name"].split(":")[0]
+
 
 def title_page(R: Report):
-    for _ in range(4):
-        R.p("", space_after=0)
+    R.p("", space_after=0)
     for text, size, bold in (("NATIONAL UNIVERSITY OF SINGAPORE", 14, True),
                              ("CDE1302 Introduction to Unmanned Aerial Vehicles", 14, False),
                              ("Academic Year 2026/27", 12, False)):
@@ -416,10 +426,9 @@ def title_page(R: Report):
         para.alignment = WD_ALIGN_PARAGRAPH.CENTER
         r = para.add_run(text)
         set_font(r, size, bold=bold)
-    R.p("", space_after=24)
+    R.p("", space_after=12)
     para = R.doc.add_paragraph()
     para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    para.paragraph_format.line_spacing_rule = WD_LINE_SPACING.SINGLE
     r = para.add_run("Autonomous AprilTag Search and Localisation with an Indoor Quadcopter")
     set_font(r, 20, bold=True)
     para = R.doc.add_paragraph()
@@ -430,1170 +439,413 @@ def title_page(R: Report):
     para.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = para.add_run("DRAFT")
     set_font(r, 14, bold=True, color="C00000")
-    R.p("", space_after=36)
+    R.p("", space_after=12)
+    para = R.doc.add_paragraph()
+    para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    para_shade(para, "EDEDED")
+    para_border(para)
+    r = para.add_run("[Image placeholder] ")
+    set_font(r, BODY_PT, bold=True)
+    add_rich(para, "Photograph of the demonstration drone (about 7 cm tall).")
+    R.p("", space_after=12)
     R.p("Group [TO BE COMPLETED: group number]  ·  Drone ID 2", align="center")
     R.table(None, "Team members", ["Name", "Matriculation number", "Primary responsibilities"],
             [["[TO BE COMPLETED: name]", "[TO BE COMPLETED]", "[TO BE COMPLETED]"]] * 4,
             widths_cm=[5.5, 4.5, 6.0], label="")
-    R.p("", space_after=24)
+    R.p(f"Source code: {REPO_URL}", align="center")
     R.p("Submitted: [TO BE COMPLETED: date]", align="center")
 
 
-def front_matter(R: Report):
-    R.h1("Abstract", page_break=True)
+def sec_summary(R: Report):
+    R.h1("Summary", page_break=True)
     R.p(
-        "This report documents the design, implementation and flight demonstration of a "
-        "pseudo-autonomous indoor quadcopter that searches an allocated rectangular area for "
-        "AprilTag fiducial markers (tag16h5 family) on the floor, returns to its take-off point, "
-        "lands, and reports the position of every tag found together with a reconstruction of the "
-        "route flown. The vehicle carries a PX4 flight controller that estimates its position from "
-        "an optical-flow sensor and a downward rangefinder only, and a Seeed XIAO ESP32-S3 Sense "
-        "companion computer that bridges PX4 to a ground laptop over Wi-Fi. The laptop plans a "
-        "boustrophedon (lawnmower) sweep, uploads it as one trajectory that the companion computer "
-        "executes on board, and detects tags in a JPEG stream in which each frame carries the PX4 "
-        "pose at the instant of capture. Tag sightings are projected into the PX4 local frame, "
-        "clustered robustly and confirmed after five consistent sightings. Five additional "
-        "localisation tags at surveyed positions are used to square the sweep to the arena before "
-        "take-off, to land precisely on the home marker, and to correct the reported tag positions "
-        "for odometry drift after the flight.")
-    R.p(
-        f"Three demonstration flights were flown. A complete four-lane sweep with the PX4 horizontal "
-        f"speed limit at 0.5 m/s located three search tags (IDs 2, 4 and 6) and "
-        f"completed the mission in {R1['t_done_s']:.1f} s. Two shortened two-lane sweeps with the "
-        f"limit raised to approximately 1.0 and 1.5 m/s located the same three tags and completed in "
-        f"{R2['t_done_s']:.1f} s and {R3['t_done_s']:.1f} s. Faster flight reduced the time to locate "
-        f"all tags from {R1['all_tags_after_sweep_start_s']:.1f} s to "
-        f"{R3['all_tags_after_sweep_start_s']:.1f} s after the start of the sweep, but increased the "
-        f"root-mean-square cross-track error from {cm(R1['xt_rms_all_m'])} to {cm(R3['xt_rms_all_m'])}, "
-        f"reduced the number of sightings per tag by a factor of about three, and left fewer "
-        f"localisation fixes for drift correction. Drift correction reduced the run-to-run "
-        f"dispersion of the reported tag positions from {cm(DISP['2']['raw']['rms_from_mean_m'])}–"
-        f"{cm(DISP['6']['raw']['rms_from_mean_m'])} to {cm(DISP['4']['corr']['rms_from_mean_m'])}–"
-        f"{cm(DISP['6']['corr']['rms_from_mean_m'])} RMS. Work carried out beyond the mission "
-        f"requirements, namely a redesigned 3D-printed frame, the electrical integration and a trial "
-        f"of ultra-wideband (UWB) positioning, is documented separately and marked [EXTRAS].")
-    R.todo("Absolute tag-position accuracy against the measured demonstration layout will be "
-           "added once the surveyed positions of the search tags used on demonstration day are "
-           "available (Section 4.6). The PX4 black-box log analysis (Section 5) is pending the "
-           "download of the onboard .ulg files.")
-
-    R.h1("Table of Contents", page_break=True)
-    para = R.doc.add_paragraph()
-    add_field(para, 'TOC \\o "1-3" \\h \\z \\u',
-              "Right-click here and choose 'Update Field' to build the table of contents.")
+        "We built a pseudo-autonomous indoor quadcopter that sweeps an allocated rectangle, "
+        "finds AprilTags on the floor, returns, lands on its start box and reports each tag's "
+        "position. With no GPS or compass, PX4 estimates position from optical flow and a "
+        "rangefinder. A laptop plans the sweep and detects tags in a camera stream whose frames "
+        "carry the drone's pose at capture. The companion computer flies the sweep on board. "
+        f"In the demonstration flights all three search tags were found with no false "
+        f"detections. From the take-off command to the land command, the full sweep took "
+        f"{R1['mission_time_s']:.0f} s and a faster two-lane sweep {R2['mission_time_s']:.0f} s. "
+        f"Surveyed localisation tags cut the distance between the two flights' tag estimates "
+        f"from {min(d['raw']['max_pairwise_m'] for d in DISP.values()) * 100:.0f}–"
+        f"{max(d['raw']['max_pairwise_m'] for d in DISP.values()) * 100:.0f} cm to "
+        f"{min(d['corr']['max_pairwise_m'] for d in DISP.values()) * 100:.0f}–"
+        f"{max(d['corr']['max_pairwise_m'] for d in DISP.values()) * 100:.0f} cm. "
+        f"AI-assisted log analysis traced sudden "
+        f"multi-metre odometry jumps in earlier trials to PX4 switching between two estimators.")
 
 
-def sec_intro(R: Report):
-    R.h1("1  Introduction")
-    R.h2("1.1  Background and mission brief")
+def sec_architecture(R: Report):
+    R.h1("1  System Architecture and Data/Control Flow")
     R.p(
-        "The CDE1302 mini project requires each group to make a small indoor quadcopter carry out "
-        "a search task with minimal human intervention. An allocated rectangle on the floor of the "
-        "flight arena contains a number of AprilTags [1], [2] of the tag16h5 family, printed with a "
-        "120 mm black square. The drone must take off from a start box, explore the rectangle, "
-        "return to the start box and land. After the flight the group reports the position of each "
-        "tag found and reconstructs the route the drone flew. The arena has no external positioning "
-        "system, and the drone has neither GPS nor a magnetometer, so every position the drone knows "
-        "comes from integrating its own sensors.")
-    R.p(
-        "Our system is *pseudo-autonomous*: a laptop plans the search and detects tags in a video "
-        "stream received over Wi-Fi, while the drone flies the uploaded path by itself. A human "
-        "operator starts the mission with two typed commands (`takeoff`, then `start`) and holds "
-        "the radio-control (RC) kill switch throughout, but does not steer the vehicle.")
-    R.h2("1.2  Objectives")
-    R.bullets([
-        "**Coverage:** fly a sweep that brings every point of the allocated area into the "
-        "camera's field of view at least once.",
-        "**Detection:** detect every search tag in the area with no false confirmations.",
-        "**Localisation:** report each tag's position in a frame tied to the arena, as accurately "
-        "as the drifting odometry allows.",
-        "**Return and landing:** return to the start box and land on it without operator input.",
-        "**Traceability:** log every event, sighting and pose so that the route and the tag "
-        "estimates can be reconstructed and audited after the flight.",
-        "**Safety:** abort to a landing on loss of link, geofence breach or time-out, with the RC "
-        "kill switch as the final authority.",
-    ])
-    R.h2("1.3  Scope and structure of this report")
-    R.p(
-        "Sections 2 and 3 describe the system and explain how the mission software works, module by "
-        "module. Section 4 presents and analyses the three demonstration flights using the "
-        "laptop-side mission logs. Section 5 is reserved for the analysis of the PX4 black-box "
-        "(ULog) recordings of the same flights. Section 6 documents work that was carried out "
-        "in addition to the mission requirements: the redesigned frame, the electrical "
-        "integration and the UWB positioning trial. These sections are marked **[EXTRAS]**. "
-        "None of them was required for the mission, and the UWB system was not used in the "
-        "demonstration flights. Section 7 concludes the report.")
-
-
-def sec_system(R: Report):
-    R.h1("2  System Overview")
-    R.h2("2.1  Vehicle platform")
-    R.p(
-        "The vehicle is the course quadcopter, rebuilt on a frame that the group redesigned for "
-        "3D printing (Section 6.1). Its avionics are summarised in "
-        f"{T('hw')}. Position is estimated by PX4's EKF2 from the inertial measurement unit (IMU) "
-        "and an MTF-02P module that combines a downward optical-flow camera with a time-of-flight "
-        "rangefinder. Because the vehicle has no compass, the heading is integrated from the gyroscope "
-        "and the axes of the PX4 local frame are fixed by the direction of the nose when EKF2 starts.")
-    R.table("hw", "Avionics and sensors used in the mission.",
-            ["Component", "Part", "Role in the mission"],
-            [["Flight controller", "MicoAir H743 V2, PX4 v1.15.4",
-              "Attitude, velocity and position control in OFFBOARD mode; EKF2 state estimation"],
-             ["Optical flow and range", "MTF-02P",
-              "Horizontal velocity (flow) and height above the floor (rangefinder)"],
+        "The task is to search an allocated rectangle of an indoor arena for tag16h5 AprilTags "
+        "[1], [2], then return, land and report each tag's position. The arena has no external "
+        "positioning system. The operator starts the mission with two typed commands (`takeoff`, "
+        "`start`) and holds the radio kill switch, but never steers.")
+    R.table("hw", "Vehicle and ground equipment.",
+            ["Component", "Part", "Role"],
+            [["Flight controller", "MicoAir H743 V2 AIO, PX4 v1.15.4",
+              "Cascaded position, velocity, attitude and rate control; EKF2 estimation"],
+             ["Flow and range sensor", "MTF-02P", "Horizontal velocity; height above the floor"],
              ["Companion computer", "Seeed XIAO ESP32-S3 Sense",
-              "MAVLink bridge to PX4 (UART, 921 600 baud), Wi-Fi link, on-board trajectory "
-              "player, camera streaming"],
-             ["Camera", "OV3660 on the XIAO Sense, facing down",
-              "320 × 240 grey-scale frames, JPEG-encoded and streamed to the laptop"],
-             ["Ground station", "Windows laptop, Python 3",
-              "Mission supervisor, planner, tag detection, logging and live map"],
-             ["Network", "Dedicated 2.4 GHz router",
-              "Drone 192.168.1.202, laptop 192.168.1.102 (static addresses)"],
-             ["Safety", "RC transmitter", "Kill switch held by the operator at all times"]],
-            widths_cm=[3.6, 4.8, 7.6])
-    R.image_placeholder("drone", "Photograph of the assembled drone, camera side visible.",
-                        "The demonstration vehicle.")
-    R.h2("2.2  Three-tier software architecture")
+              "MAVLink bridge, Wi-Fi link, on-board trajectory player, camera"],
+             ["Camera", "OV3660, facing down", "320 × 240 JPEG stream to the laptop"],
+             ["Ground station", "Laptop, dedicated router", "Mission logic, planning, detection, logs"],
+             ["Frame", "Group-designed 3D-printed PLA", "See below"],
+             ["Propulsion, battery", "[TO BE COMPLETED]", "[TO BE COMPLETED]"]],
+            widths_cm=[3.6, 5.2, 7.2])
     R.p(
-        "Control is split across three computers, each doing what it is best placed to do "
-        f"({F('arch')}). The **laptop** runs the mission logic, the search planner, the AprilTag "
-        "detector and the logging, at a 10 Hz supervisory rate. The **ESP32-S3** runs FreeRTOS "
-        "firmware that owns the MAVLink link to PX4. It arms the vehicle, takes off and lands, "
-        "plays the uploaded trajectory, streams 20 Hz position setpoints to PX4 and streams camera "
-        "frames to the laptop. **PX4** closes the cascaded position, velocity, attitude and rate "
-        "loops. This split means that a Wi-Fi drop does not interrupt the flight path. Once a "
-        "trajectory has been uploaded, the ESP32 plays it from PX4's position, which it reads over "
-        "the UART link, without waiting for the laptop.")
+        f"Control is split across three computers ({F('arch')}). The **laptop** runs a 10 Hz "
+        "mission state machine, the planner, the tag detector and the logging. The **ESP32-S3** "
+        "talks MAVLink [5] to PX4 over a 921 600 baud UART and to the laptop over UDP. It arms, "
+        "takes off and lands the drone, plays the uploaded trajectory at 20 Hz and streams the "
+        "camera. **PX4** [4] closes the control loops. The data loop runs as follows: the laptop "
+        "uploads the planned path; the ESP32 turns it into position setpoints; PX4 flies them and "
+        "reports its pose; the ESP32 stamps each camera frame with that pose; the laptop detects "
+        "tags, updates the tag map and decides the next phase. Because the ESP32 flies the path "
+        "itself, Wi-Fi delay or loss does not disturb the flight.")
     R.image_placeholder(
-        "arch", "System block diagram (laptop ⇄ router ⇄ ESP32-S3 ⇄ PX4, camera and sensors). "
-        "Source: the Mermaid diagram 'System overview' in the repository README.md.",
-        "System architecture and data flow.")
-    R.image_placeholder(
-        "control", "Cascaded control diagram (laptop 10 Hz state machine → ESP32 trajectory gate "
-        "→ PX4 position/velocity/attitude/rate loops). Source: 'Control architecture' in README.md.",
-        "Control architecture across the three computers.")
-    R.h2("2.3  Communication links")
-    R.table("links", "Communication links and their contents.",
-            ["Link", "Transport", "Content"],
-            [["Laptop → ESP32 (port 5006)", "UDP",
-              "Commands: `CMD_START`, `CMD_GOTO`, `CMD_TRAJ_DATA`, `CMD_TRAJ_START`, `CMD_HOLD`, "
-              "`CMD_LAND`, camera keep-alive"],
-             ["ESP32 → laptop (port 5005)", "UDP, 10 Hz",
-              "Telemetry: PX4 local position, heading, firmware navigation state"],
-             ["ESP32 → laptop (port 5009)", "UDP, ≈7–10 frames/s",
-              "JPEG frames in ≤1400-byte chunks, each frame carrying the PX4 pose at capture"],
-             ["ESP32 ⇄ PX4", "UART 921 600 baud, MAVLink",
-              "`SET_POSITION_TARGET_LOCAL_NED` at 20 Hz; `LOCAL_POSITION_NED`, heartbeat, "
-              "attitude from PX4"],
-             ["ESP32 ⇄ QGroundControl (14550 / 8888)", "UDP MAVLink bridge",
-              "Parameter access and gyroscope calibration through the ESP32"],
-             ["RC transmitter → PX4", "Radio", "Kill switch"]],
-            widths_cm=[4.6, 3.6, 7.8])
-    R.h2("2.4  Coordinate frames and conventions")
+        "arch", "Block diagram: laptop ⇄ router ⇄ ESP32-S3 ⇄ PX4, camera and flow sensor, with the "
+        "control cascade (10 Hz mission logic → 20 Hz setpoints → PX4 loops).",
+        "System architecture and data/control flow.")
     R.p(
-        "Three right-handed frames are used. The **PX4 local frame** is North-East-Down (NED) in "
-        "metres, with its origin where EKF2 started (the take-off spot). Because there is no compass, "
-        "its x-axis points wherever the nose pointed at power-up. The **body frame** has x forward, "
-        "y right and z down. The **arena frame** has its origin at the centre of the home "
-        "localisation tag (ID 29) in the start box, x along the length of the search area and y to "
-        "the right. The floor of the arena is tiled on a 0.46 m grid, so a grid node (a, b) lies at "
-        "x = 0.46 b, y = 0.46 a. The allocated search area spans x = 0.92–4.60 m and "
-        "y = −1.84–1.38 m in this frame. Heading is measured in radians from North, clockwise "
-        "positive, and is held constant throughout the flight.")
+        "Positions are in PX4's local North-East-Down frame, with its origin at take-off and, "
+        "with no compass, its x-axis wherever the nose pointed at power-up. Tags are reported in "
+        "an arena frame centred on a home tag in the start box. The heading is held constant "
+        "throughout the flight, so the drone flies sideways and backwards rather than turning.")
+    R.p(
+        "Beyond the course baseline, we redesigned the frame. The course frame was made for "
+        "carbon fibre but printed in PLA, which is 20–30 times less stiff, and it flexed "
+        "visibly. The new arms place material in deep top and bottom lattices joined by trusses, "
+        "cutting the simulated deflection under a 30 N·m bending load from 14.4 mm to 5.31 mm "
+        "(−63 %) at the same 50 g. They also need no print supports and cut assembly time from "
+        "about an hour to 15 minutes.")
 
 
-def sec_software(R: Report):
-    R.h1("3  Software Design and Implementation")
+def sec_navigation(R: Report):
+    R.h1("2  Exploration and Navigation Strategy")
     R.p(
-        "The mission software lives in `cde1302/mission/` (laptop, Python) and `cde1302/main/` "
-        "(ESP32 firmware, C). The laptop code builds on the course-provided helpers in "
-        "`cde1302/laptop/` (UDP protocol, camera stream reassembly and an AprilTag detector compiled "
-        "from the same C sources as the firmware), which are imported read-only. This section "
-        "follows the data from the operator's command to the final report.")
-
-    # 3.1
-    R.h2("3.1  Mission supervisor and state machine")
+        "**Mission phases and safety.** The laptop steps through CONNECTING → READY → TAKING_OFF "
+        "→ HOVERING → EXPLORING → RETURNING → LANDING → DONE. The sweep starts only after the "
+        "drone has held position within 10 cm for 2 s. A geofence 0.5 m around the area and "
+        "path, or a 10 s telemetry time-out, triggers an automatic landing. The firmware cuts the "
+        "motors if Wi-Fi is lost for about 3 s, and the kill switch has final authority.")
     R.p(
-        "`mission.py` is the entry point. It loads and validates `config.yaml`, connects to the "
-        "drone, starts the camera pipeline and then calls a non-blocking `Mission.tick()` at 10 Hz. "
-        f"Each tick runs the handler of the current phase ({T('states')}) and the safety checks. "
-        "Every transition and decision is written to `events.csv` with wall-clock and mission time, "
-        "so the behaviour of a flight can be reconstructed exactly.")
-    R.table("states", "Mission phases and their exit conditions.",
-            ["Phase", "What happens", "Exit condition"],
-            [["CONNECTING", "Wait for telemetry from the drone", "First telemetry packet"],
-             ["READY", "On the ground; operator may `calibrate` the gyroscopes",
-              "Operator types `takeoff` (sends `CMD_START`)"],
-             ["TAKING_OFF", "ESP32 switches PX4 to OFFBOARD, arms and climbs to 0.8 m",
-              "A probe `CMD_GOTO` to the current position is answered with ARRIVED"],
-             ["HOVERING", "Hover is checked; home tag 29 is observed",
-              "Horizontal position within 0.10 m for 2 s, then operator types `start`"],
-             ["EXPLORING", "Plan aligned to the home tag, uploaded and flown; tags collected",
-              "Firmware reports the trajectory finished"],
-             ["RETURNING", "Return trajectory to the home tag; precision-landing hold; then the "
-              "tag report and drift fit are written",
-              "Within 8 cm of the home tag, or 10 s after arriving"],
-             ["LANDING", "`CMD_LAND` sent three times", "6 s settling time"],
-             ["DONE", "Correction plot and corrected route saved", "—"],
-             ["ABORT_LANDING", "Entered from any airborne phase on a safety trigger", "Landed"]],
-            widths_cm=[3.2, 7.0, 5.8])
-    R.p(
-        "Hover cannot be confirmed from altitude because the telemetry packet carries none. "
-        "Instead, the laptop sends a `CMD_GOTO` to the drone's own position. The firmware only "
-        "answers ARRIVED once its take-off phase is complete, which proves the vehicle is airborne "
-        "and under offboard control. The laptop additionally requires the horizontal position to "
-        "stay within `hover_radius_m` = 0.10 m for `hover_settle_s` = 2 s.")
-    R.image_placeholder("states", "State diagram of the mission phases (CONNECTING → … → DONE, "
-                        "with ABORT_LANDING from every airborne phase).",
-                        "Mission state machine.")
-
-    # 3.2
-    R.h2("3.2  Safety layers")
-    R.p(f"Several independent mechanisms can end a flight. They are listed in {T('safety')}, from "
-        "the most automatic to the most authoritative.")
-    R.table("safety", "Safety mechanisms.",
-            ["Layer", "Trigger", "Action"],
-            [["Laptop geofence", "Position outside the area, home and planned path grown by 0.5 m",
-              "ABORT_LANDING"],
-             ["Laptop stale-link check", "No telemetry for 10 s", "ABORT_LANDING"],
-             ["Laptop time limit", "Mission time > 600 s", "Stop searching, return and land"],
-             ["Trajectory watchdog", "Trajectory not started after 20 uploads, or not finished "
-              "within 4 × the planned time + 10 s", "Abort or return"],
-             ["Operator", "`land` command or Ctrl+C", "Land immediately"],
-             ["Firmware Wi-Fi kill switch", "ESP32 loses the router for more than ≈3 s",
-              "Motors stopped"],
-             ["Firmware setpoint watchdog", "Velocity-type setpoint not refreshed",
-              "Position hold"],
-             ["RC kill switch", "Operator", "Motors stopped (final authority)"]],
-            widths_cm=[4.2, 7.0, 4.8])
-
-    # 3.3
-    R.h2("3.3  Search-pattern planning")
-    R.p(
-        "`planner.py` generates a boustrophedon (lawnmower) sweep: parallel lanes along the length of "
-        "the area (`lanes_along: x`), flown in alternate directions. The area is first shrunk by a "
-        "margin m = 0.30 m on every side, so that the waypoints stay clear of the boundary. For a "
-        "shrunk width W and a maximum lane spacing s_max the number of lanes and the actual spacing are")
+        "**Lawnmower sweep.** The area is shrunk by a 0.3 m margin and covered by parallel "
+        "lanes along its length. For a shrunk width W and a maximum spacing s_max:")
     R.equation("n = ⌈W / s_max⌉ + 1,    s = W / (n − 1)", 1)
     R.p(
-        "so that the outer lanes lie exactly on the shrunk boundary and no gap exceeds s_max. With "
-        "W = 2.62 m, the full sweep (s_max = 1.0 m) has four lanes 0.873 m apart and eight waypoints. "
-        "The truncated sweeps (s_max = 3.0 m) have only the two outer lanes, 2.62 m apart, and four "
-        "waypoints.")
-    R.p(
-        "The lane spacing must not exceed the width of the strip in which a tag can be decoded. With "
-        "the course's lens model (f_x = 163.5 px, f_y = 153.2 px at 320 × 240 px) and the camera "
-        "looking straight down from h = 0.8 m, the ground footprint is")
+        "This puts the outer lanes on the boundary, with no gap larger than s_max. At height "
+        "h = 0.8 m, with focal lengths f_x = 163.5 px and f_y = 153.2 px, the camera footprint is")
     R.equation("w_across = h · 320 / f_x ≈ 1.57 m,    w_along = h · 240 / f_y ≈ 1.25 m", 2)
     R.p(
-        "A tag is decoded only when the whole 112 mm black square is inside the image, which leaves "
-        "an effective swath of about 1.45 m. The full sweep therefore overlaps adjacent lanes by "
-        "about 0.6 m and covers the whole area with margin. The two-lane sweep leaves a central "
-        "strip, roughly 1.2 m wide, that the camera does not see along the lanes. That strip is "
-        "only crossed by the short transit legs at the two ends (Section 4.9).")
-    R.image_placeholder("lawnmower", "Planner output for the full and the truncated sweep "
-                        "(`python mission/planner.py --plot`), with the camera footprint drawn "
-                        "along each lane.", "Planned lawnmower sweeps.")
-
-    # 3.4
-    R.h2("3.4  Trajectory generation and upload")
+        "A tag must lie wholly in the image, so the usable swath is about 1.45 m. Four lanes "
+        "0.87 m apart therefore cover the area with overlap.")
     R.p(
-        "In the configuration used for the demonstration (`flight.nav_mode: trajectory`), the sweep "
-        "is not commanded waypoint by waypoint from the laptop. `trajectory.py` samples the polyline "
-        "from the drone's current position through all waypoints at a constant speed "
-        "(`cruise_speed_mps` = 0.30 m/s) every 0.20 s. It converts the samples into offsets from "
-        "the start point, and `CMD_TRAJ_DATA` packets upload them to the ESP32, followed by "
-        "`CMD_TRAJ_START`. The full sweep was 282 samples, well below the firmware limit of 2400. "
-        "The laptop confirms the start from the firmware's navigation state (TRAJ) and re-uploads "
-        "if it is not seen within 2 s. The return home and every precision-landing correction are "
-        "uploaded the same way as short trajectories.")
-    R.p(
-        "Before upload, the plan, written in the arena frame, is rotated and translated into the PX4 "
-        "frame using the home tag observed during the hover (Section 3.9). The heading is never "
-        "changed in flight: the drone flies the lanes sideways and backwards as required. This avoids "
-        "yaw manoeuvres, which would add gyroscope drift and motion blur.")
-
-    # 3.5
-    R.h2("3.5  On-board trajectory execution (trajectory gate)")
-    R.p(
-        "On the ESP32, `traj_gate.c` decides, at every control tick, where along the uploaded path the "
-        "position setpoint should be. It is written in plain C99 with no ESP-IDF dependencies, so the "
-        "identical source is compiled and unit-tested on the laptop. Three modes were implemented "
-        f"and flight-tested ({T('gate_modes')}). None of them has a clock: the target only advances "
-        "when the drone does, so a slow or disturbed drone still flies every lane.")
-    R.table("gate_modes", "Trajectory-gate modes (firmware menuconfig).",
-            ["Mode", "Setpoint sent to PX4", "Observed behaviour"],
-            [["Carrot (lookahead)", "Point 25 cm ahead of the drone along the path",
-              "Steady speed of about 0.33 m/s, but slows into every corner and surges after it"],
-             ["Follow (velocity feed-forward)",
-              "Point just ahead of the drone's progress plus a feed-forward velocity along the "
-              "path, ramped at corners",
-              "Designed for tight cross-track tracking; in flight slower and less smooth than "
-              "waypoint mode"],
-             ["**Waypoint (used)**", "The next corner of the path, held until the drone is within "
-              "15 cm", "Fastest and smoothest; PX4 accelerates up to `MPC_XY_VEL_MAX` on each "
-              "lane"]],
-            widths_cm=[3.8, 6.2, 6.0])
-    R.p(
-        "Follow mode was developed in response to an analysis of an earlier PX4 log (Section 5.2). "
-        "That analysis showed that a distant position step limits the cross-track correction, "
-        "because PX4 saturates the horizontal velocity demand by its *norm*. With an along-track "
-        "error e_a, a cross-track error e_c and a speed limit v_max, the corrective velocity "
+        "**On-board execution.** The laptop rotates the plan into PX4's frame and uploads it to "
+        "the ESP32 in one go. The ESP32 sends PX4 the next lane end as the setpoint, moving on "
+        "once the drone is within 15 cm, so PX4's speed limit `MPC_XY_VEL_MAX` sets the cruise "
+        "speed. The weakness is sideways correction. PX4 limits the *norm* of the velocity "
+        "demand, so with along-track error e_a and cross-track error e_c the corrective speed "
         "across the lane is only")
     R.equation("v_c ≈ v_max · e_c / √(e_a² + e_c²)", 3)
+    R.p("At the start of a long lane this is a few cm/s, which explains the cross-track bias "
+        "seen in Section 5.")
     R.p(
-        "This is about 0.03 m/s for e_c = 0.35 m at the start of a 4.8 m lane with v_max = 0.4 m/s. "
-        "In back-to-back flights on 11 November 2026, however, waypoint mode with 15 cm corner "
-        "radii proved faster, smoother and in practice more accurate: shorter flights accumulate "
-        "less gyroscope and flow drift. It was therefore used for all three demonstration "
-        "flights (branch `feature/loc-tags-waypoints`, `CONFIG_TRAJ_WAYPOINTS=y`). A consequence "
-        "is that in waypoint mode the flight speed is set by PX4's `MPC_XY_VEL_MAX` and not by "
-        "`cruise_speed_mps`. Changing `MPC_XY_VEL_MAX` was therefore how the speed was raised for "
-        "the truncated runs.")
-    R.p(
-        "`mavlink_task.c` sends the resulting `SET_POSITION_TARGET_LOCAL_NED` to PX4 at 20 Hz, with "
-        "the heading fixed at its take-off value and the altitude held at "
-        "`CONFIG_CRUISE_ALT_CM` = 80 cm.")
+        "**Alignment, return and landing.** With no compass, a 3° placement error would put the "
+        "far end of a lane 0.25 m off line. While hovering, the drone measures the orientation of "
+        "the home tag, which is taped square to the floor tiles, and the plan is rotated to match. "
+        "After the sweep it flies back and re-observes the home tag. If the tag is more than 8 cm "
+        "away, it moves over it (at most three corrections in 10 s) and lands.")
 
-    # 3.6
-    R.h2("3.6  Camera streaming with the pose at capture")
-    R.p(
-        "A tag's position on the floor is the drone's position at the moment the image was taken "
-        "plus the tag's offset in the image. A Wi-Fi delay of 100–200 ms between capture and "
-        "reception would, at 0.5 m/s, shift every tag by 5–10 cm along the direction of flight. To "
-        "remove this error source, the firmware pairs each frame with PX4's pose on the ESP32's own "
-        "clock. `pose_hist.c` keeps the last 128 `LOCAL_POSITION_NED` samples (≈2.5 s at 50 Hz) "
-        "with their arrival times. `camera_stream.c` looks up the sample nearest to the frame's "
-        "capture time and inserts it into the JPEG as a 28-byte comment (COM) segment directly "
-        "after the start-of-image marker. JPEG decoders ignore COM segments, so the course's viewers "
-        "still display the frames. On the laptop, `frame_pose.py` parses the segment (magic "
-        "`CDEP`, version, validity flag, gap to the PX4 sample in ms, x, y, heading and yaw rate). "
-        "Frames whose pose is more than 100 ms from a PX4 sample are rejected.")
 
-    # 3.7
-    R.h2("3.7  AprilTag detection and geolocation")
+def sec_detection(R: Report):
+    R.h1("3  AprilTag Detection and Target Localisation")
     R.p(
-        "`tag_pipeline.py` runs on a background thread. It keeps the camera stream alive, "
-        "reassembles the UDP chunks into JPEGs, decodes them to grey-scale with OpenCV and runs "
-        "`apriltag_host.Detector`. This is the course's port of the AprilTag library (esp-apriltag), "
-        "compiled for the laptop from the firmware's own C sources, so detections, decision margins and the quality "
-        "gate are identical to the on-board detector. Each detection yields the tag's translation "
-        "t_c in the camera frame from the homography and the known tag size. The mission then "
-        "applies its own camera mount (pitch 90°, lens 8 cm forward of the centre) and the frame "
-        "pose:")
-    R.equation("p_body = R_bc(θ_pitch) · t_c + r_lens", 4)
-    R.equation("p_NED = [x, y]_drone + R_z(ψ_drone) · [p_body,x , p_body,y]", 5)
+        "**Pose at capture.** Wi-Fi latency of 100–200 ms would shift every tag by 5–10 cm at "
+        "0.5 m/s. The ESP32 therefore keeps a short history of PX4 poses and embeds the pose "
+        "nearest the capture time in each JPEG, as a comment segment that image viewers ignore. "
+        "Frames with no PX4 sample within 100 ms are discarded.")
     R.p(
-        f"where R_bc maps the camera axes (x right, y down, z out of the lens) into the body axes and "
-        f"ψ is the heading at capture. A detection becomes a *sighting* only if it passes every "
-        f"filter in {T('filters')}.")
-    R.table("filters", "Detection filters applied before a sighting is accepted.",
-            ["Filter", "Threshold", "Purpose"],
-            [["Decision margin", "≥ 55", "Reject weak decodes (tag16h5 has only 30 codes)"],
-             ["Hamming distance", "≤ 1 bit", "Reject heavily corrected decodes"],
-             ["Pose reprojection error", "≤ 0.5", "Reject poorly fitted quadrilaterals"],
-             ["Range from camera", "≤ 1.5 m", "Reject distant, low-resolution tags"],
-             ["Height of tag relative to drone", "−0.5 m to 0.95 m below", "Reject implausible "
-              "geometry"],
-             ["Yaw rate at capture", "≤ 30 °/s", "Reject frames blurred by rotation"],
-             ["Frame pose available", "PX4 sample within 100 ms", "Reject frames with no pose"]],
-            widths_cm=[4.4, 4.2, 7.4])
-    R.image_placeholder("projection", "Diagram of the projection chain: image → camera frame → "
-                        "body frame → PX4 NED, showing the lens offset and the heading.",
-                        "Geolocation of a detected tag.")
+        "**Detection and geolocation.** The laptop runs the course's AprilTag detector. Each "
+        "detection gives the tag position t_c in the camera frame. This is mapped into the body "
+        "frame (camera pitched 90°, lens 8 cm ahead of centre) and then into PX4's frame using "
+        "the pose at capture:")
+    R.equation("p_NED = [x, y]_drone + R_z(ψ) · (R_bc · t_c + r_lens)_xy", 4)
+    R.p(
+        "**Confirmation.** tag16h5 has only 30 codes, so false decodes are possible. Detections "
+        "with a low decision margin, corrected bits, a poor pose fit, long range or a high yaw "
+        "rate are rejected (" + T("params") + "). For each tag ID, the remaining sightings are clustered "
+        "robustly. The seed is the sighting with the most neighbours within 0.2 m, and the "
+        "estimate is the median of the sightings within 0.3 m of it. The tag is confirmed once "
+        "five sightings agree within 0.2 m. An isolated false decode cannot gather five "
+        "neighbours, so it is never confirmed.")
+    R.p(
+        "**Drift correction.** Optical-flow odometry drifts in scale, heading and position. "
+        "Five localisation tags (IDs 22–25 and 29) were placed at surveyed floor-grid positions. "
+        "Each visit to one pairs its PX4 position with its surveyed position. After the flight, "
+        "a 2-D similarity transform is fitted to all visits by least squares [3]:")
+    R.equation("p_arena = s · R(θ) · p_PX4 + t", 5)
+    R.p(
+        "Here s absorbs the flow scale error, θ the heading error and t the offset. A hybrid "
+        "model also interpolates the remaining drift between visits in time, and the software "
+        "keeps whichever model best predicts held-out visits. The correction is applied only to "
+        "the report and never fed back to PX4, so it cannot cause a jump in flight.")
 
-    # 3.8
-    R.h2("3.8  Tag clustering and confirmation")
-    R.p(
-        "`tag_map.py` turns the stream of noisy sightings into one estimate per tag ID. A simple "
-        "mean is fragile because a single wrong-ID decode or a sighting taken during a jerk can "
-        "pull it far away, so the estimate is built robustly at every new sighting:")
+
+def sec_params(R: Report):
+    R.h1("4  Important Parameters and Implementation Decisions")
+    R.table("params", "Key parameters (Run 1, the full search) and the reasons for them.",
+            ["Parameter", "Value", "Reason"],
+            [["Flight height", "0.8 m", "1.45 m swath; smaller relative rangefinder error"],
+             ["Lane spacing (max) / margin", "1.0 m / 0.3 m", "Four lanes, 0.6 m overlap"],
+             ["Speed limit `MPC_XY_VEL_MAX`", "0.5 m/s", "≥ 5 frames per tag; tracking"],
+             ["Corner acceptance radius", "15 cm", "Smooth corners without cutting lanes"],
+             ["Mission tick / setpoint rate", "10 Hz / 20 Hz", "Laptop logic / on-board player"],
+             ["Detector gate", "margin ≥ 55, ≤ 1 bit, ≤ 1.5 m, ≤ 30°/s",
+              "Reject weak, distant or blurred decodes"],
+             ["Pose match window", "100 ms", "Reject frames with no pose"],
+             ["Tag confirmation", "5 sightings within 0.2 m", "No false confirmations"],
+             ["Hover check", "10 cm for 2 s", "Stable before the sweep"],
+             ["Precision landing", "8 cm, ≤ 3 moves, ≤ 10 s", "Land on the start box"],
+             ["Geofence / link time-out", "0.5 m / 10 s", "Automatic landing"],
+             ["IMU priority", "BMI088 highest, BMI270 lowest", "Avoid estimator switches (§6)"]],
+            widths_cm=[5.0, 5.0, 6.0])
+    R.p("The main implementation decisions were:")
     R.bullets([
-        "**Seed:** the sighting with the most neighbours within `confirm_radius_m` = 0.20 m (the "
-        "densest point).",
-        "**Inliers:** all sightings within `outlier_radius_m` = 0.30 m of the seed.",
-        "**Estimate:** the per-axis median of the inliers, refined once by re-selecting inliers "
-        "around that median.",
-        "**Confirmation:** the tag is confirmed the first time at least `min_sightings` = 5 "
-        "sightings lie within 0.20 m of the estimate. The estimate keeps improving afterwards.",
-    ], numbered=True)
-    R.p(
-        "An isolated false sighting can never gather five supporting neighbours, so it is never "
-        "confirmed. Localisation tag IDs (22–29) are routed to `localisation.py` instead of the tag map.")
-
-    # 3.9
-    R.h2("3.9  Localisation tags: alignment, precision landing and drift correction")
-    R.p(
-        "Optical-flow odometry drifts. Scale errors arise from rangefinder error (at 0.8 m, 1 cm of "
-        "height error is a 1.25 % velocity error), heading drifts with the gyroscope, and position "
-        "creeps slowly. To give the drifting PX4 frame something fixed to compare against, five "
-        "additional tag16h5 tags were placed at surveyed grid nodes (" + T("loc_params") + "). "
-        "They use the highest IDs of the family, so they can never be confused with the search "
-        "tags. The course-supplied detector table, which stopped at ID 21, was extended to the full "
-        "family of 30 codes. The localisation tags are used in three ways. None of them feeds "
-        "a position back into PX4.")
-    R.table("loc_params", "Localisation tags used in the demonstration (arena frame).",
-            ["ID", "Grid node (a, b)", "x (m)", "y (m)", "Role"],
-            [["29", "(0, 0)", "0.00", "0.00", "Home tag: alignment, landing spot, drift fix at start and end"],
-             ["25", "(−2, 5)", "2.30", "−0.92", "Drift fix"],
-             ["23", "(1, 5)", "2.30", "0.46", "Drift fix"],
-             ["22", "(−3, 9)", "4.14", "−1.38", "Drift fix"],
-             ["24", "(0, 9)", "4.14", "0.00", "Drift fix"]],
-            widths_cm=[1.4, 3.0, 1.8, 1.8, 8.0], align=["c", "c", "r", "r", "l"])
-    R.h3("Alignment before the sweep")
-    R.p(
-        "Without a compass, a drone placed 3° off square would sweep about 0.25 m off line at the "
-        "far end of a 4.6 m lane. While hovering over the start box, the camera measures the "
-        "orientation of the home tag, which is taped square to the floor tiles. The quarter-turn "
-        "ambiguity of a square tag is resolved by taking the angle modulo 90°. The plan is then "
-        "rotated by that angle and translated onto the tag's observed position before upload. "
-        "Rotations larger than 15° are treated as misreadings and ignored.")
-    R.h3("Precision landing")
-    R.p(
-        "The position of the home tag seen during take-off defines the landing target. After the "
-        "return trajectory, the drone hovers and re-observes the tag. If the tag is now more than "
-        "`land_radius_m` = 8 cm from where the drone thinks it is, because the odometry drifted "
-        "during the flight, a short correction trajectory moves the drone over it. This is repeated "
-        "at most three times and within at most 10 s before landing.")
-    R.h3("Drift correction of the report")
-    R.p(
-        "Each time a localisation tag is in view, the visit (at least five sightings, separated "
-        "from other visits by more than 5 s) gives a *fix*: the tag's robust position in the PX4 "
-        "frame paired with its surveyed arena position. After the return, a 2-D similarity transform "
-        "is fitted to all fixes by least squares (the closed-form solution of Umeyama [3]):")
-    R.equation("p_arena = s · R(θ) · p_PX4 + t", 6)
-    R.p(
-        "Here s absorbs optical-flow scale error, θ the residual heading error and t the offset. "
-        "The fit falls back to a rigid (s = 1) or translation-only model if the fixes span less "
-        "than 1 m or if a check fails (RMS > 0.15 m, |θ| > 20°, |s − 1| > 0.25). One global "
-        "transform cannot describe drift that changes during the flight. The software therefore "
-        "also builds a *time* model, which interpolates the drift measured at each visit to the "
-        "time each search tag was seen, and a *hybrid* model, which applies the global transform "
-        "and then interpolates the remaining drift in time. In `auto` mode the model with the "
-        "lowest leave-one-out prediction error over the visits is chosen. All three demonstration "
-        "flights selected the hybrid model.")
-
-    # 3.10
-    R.h2("3.10  Logging, live map and post-flight tools")
-    R.p(
-        "`mission_log.py` creates one folder per run containing `events.csv` (every event and "
-        "transition), `trajectory.csv` (the reconstructed route from 10 Hz telemetry), "
-        "`detections.csv` (every accepted detection with its camera pose, body offset, drone pose "
-        "and NED position), `tags_final.csv` (raw PX4 frame), `tags_corrected.csv` and "
-        "`localisation.csv` (arena frame), `trajectory_corrected.csv`, a copy of the configuration "
-        "used (`config_used.yaml`), the live-map snapshot `map.png` and the before/after "
-        f"correction plot `correction.png`. The live map ({F('livemap')}) shows the area, plan, "
-        "trail, candidate and confirmed tags and the camera view with each detection outlined and "
-        "labelled as accepted or rejected. Post-flight tools include `tools/relocalise.py` "
-        "(recompute the correction from a log, e.g. after re-measuring the localisation tags), "
-        "`tools/compare_flights.py` (path, speed, corner and return statistics across runs), "
-        "`tools/loc_layout.py` (click-to-place localisation tags on the grid) and "
-        "`tools/cam_bench.py` (camera intrinsic and mount calibration on the bench).")
-    R.figure("livemap", ROOT / "data" / "flights" / "truncated-exploration-2" / "map.png",
-             "Live map at the end of Run 3, as saved by the mission (`map.png`). Left: search "
-             "area, planned path, drone trail, confirmed tags (red) and localisation tags "
-             "(violet). Right: the last camera frame with a rejected decode outlined. The '3/6' "
-             "counter reflects the configured `expected_count`, not a verified tag total.",
-             width_cm=16.0)
-
-    # 3.11
-    R.h2("3.11  Configuration management")
-    R.p(
-        "Every mission number lives in `mission/config.yaml`. `settings.py` loads it into typed, "
-        "immutable dataclasses, checks ranges and cross-field consistency, and rejects unknown keys, "
-        "so that a typing error fails before take-off rather than in the air. A copy of the file "
-        "actually used is stored with each run. Firmware parameters (trajectory mode, corner "
-        "radius, cruise altitude, network addresses) are set in ESP-IDF `menuconfig` and require "
-        "re-flashing. PX4 parameters are set from QGroundControl through the ESP32's MAVLink "
-        f"bridge. The values used in the demonstration are listed in Appendix B ({T('config')}).")
-
-    # 3.12
-    R.h2("3.12  Verification: simulator and automated tests")
-    R.p(
-        "`sim.py` replaces the drone and the camera with a simulated vehicle that follows the same "
-        "UDP protocol and state sequence. It has configurable command loss, latency, pose noise and "
-        "false-positive rate, and it can simulate odometry drift (scale, rotation and creep) to "
-        "exercise the localisation correction. A synthetic camera (`synth_camera.py`) renders "
-        "real tag16h5 images, so the actual detector is exercised. The full mission runs "
-        "end-to-end with `python mission/mission.py --sim --auto --map`.")
-    R.p(
-        "The repository contains an automated test suite of 24 test modules. The pure-C firmware "
-        "modules (`traj_gate`, `pose_hist`, the UWB parser and the UWB-to-PX4 converter) are "
-        "compiled on the laptop with a host C compiler and driven from Python, which checks the wire formats and "
-        "algorithms on both sides. On the configuration used for this report the suite "
-        "completed with **432 tests passed and 1 skipped** "
-        "(`python -m pytest mission/tests -q`, run on 12 November 2026).")
+        "**Fly the sweep on board**, not by streaming waypoints from the laptop, so that Wi-Fi "
+        "cannot disturb the path.",
+        "**Waypoint mode** for the setpoints. A fixed look-ahead point and a velocity "
+        "feed-forward follower were also built and flown. Waypoint mode was the fastest and "
+        "smoothest, and the shorter flight left less time for drift.",
+        "**Detect on the laptop**, with each frame carrying its own pose, so that the full "
+        "frame rate is available and latency cannot bias the result.",
+        "**Localisation tags instead of UWB.** A teammate trialled a LinkTrack UWB system [6] "
+        "fused into PX4 as an external position source. It worked, with 5–7 cm static scatter, "
+        "but it sometimes pulled the drone sideways near the far end. In a 5 m × 3 m arena the "
+        "flow drift over a one-minute flight (10–25 cm) is similar to the UWB error, so the gain "
+        "was insignificant and UWB was left out.",
+    ])
 
 
 def sec_results(R: Report):
-    R.h1("4  Mission Demonstration: Flight Results and Analysis")
+    R.h1("5  Experimental Results")
     R.p(
-        "This section analyses the three demonstration flights from the laptop-side mission logs. "
-        "All positions below are PX4's own estimates relayed at about 10 Hz, unless stated as "
-        "corrected. They are not ground truth: the only external reference available is the "
-        "set of localisation tags. The figures and numbers are generated by "
-        "`report/analyse_flights.py` from copies of the logs in `report/data/flights/`.")
-
-    R.h2("4.1  Test configuration and procedure")
+        "Two demonstration flights from 11 November 2026 are reported. Run 1 was the full "
+        "search at 0.5 m/s. Run 2 flew only the two outer lanes, with the speed limit raised to "
+        "1.5 m/s to find the tags faster. Both completed without steering or a safety trigger, "
+        f"and both confirmed the same three search tags with no false tags ({T('summary')}). "
+        "Mission time runs from the take-off command to the land command. Positions are PX4 "
+        "estimates unless stated as corrected.")
+    sight = lambda r: f"{min(t['n_sightings'] for t in r['tags'])}–{max(t['n_sightings'] for t in r['tags'])}"
+    runs = (R1, R2)
+    rows = [
+        ["Lanes (spacing)"] + [f"{r['n_lanes']} ({2.62 / (r['n_lanes'] - 1):.2f} m)" for r in runs],
+        ["Speed limit / median lane speed (m/s)"] + [
+            f"{r['mpc_xy_vel_max']:.1f} / {r['speed_cruise_median_mps']:.2f}" for r in runs],
+        ["Sweep duration (s)"] + [f"{r['sweep_duration_s']:.1f}" for r in runs],
+        ["All tags confirmed, from sweep start (s)"] + [f"{r['all_tags_after_sweep_start_s']:.1f}" for r in runs],
+        ["Mission time, take-off to land command (s)"] + [f"{r['mission_time_s']:.1f}" for r in runs],
+        ["Cross-track error RMS / worst overshoot (cm)"] + [
+            f"{r['xt_rms_all_m'] * 100:.1f} / {r['overshoot_max_m'] * 100:.1f}" for r in runs],
+        ["Sightings per search tag"] + [sight(r) for r in runs],
+        ["Localisation fixes / fitted scale"] + [
+            f"{r['loc_fit']['n_fixes']} / {r['loc_fit']['scale']:.3f}" for r in runs],
+        ["Home-tag offset on arrival / at landing (cm)"] + [
+            f"{r['land_first_offset_cm']:.0f} / {r['land_final_offset_cm']:.0f}" for r in runs],
+    ]
+    R.table("summary", "Results of the two demonstration flights.",
+            ["", "Run 1 (full)", "Run 2 (truncated)"], rows,
+            widths_cm=[8.4, 3.8, 3.8], align=["l", "c", "c"])
+    R.figure("path1", FIG / "fig_path_run1.png",
+             "Run 1 (full sweep, 0.5 m/s). Left: PX4 frame, with the plan, raw tags and "
+             "localisation-tag visits. Right: drift-corrected route and tags.", width_cm=12.0)
+    pct = lambda r: 100 * r["speed_cruise_median_mps"] / r["mpc_xy_vel_max"]
     R.p(
-        "The first flight (Run 1) was the full search of the allocated area. The two subsequent "
-        "flights (Runs 2 and 3) reduced the sweep to the two outer lanes and raised PX4's "
-        "horizontal speed limit in order to find all tags faster. Everything else was "
-        f"unchanged between the runs ({T('runs')}). For each run the drone was placed square "
-        "on the home tag, powered up and left still. The operator typed `takeoff`, waited "
-        "for the hover message and typed `start`. No further input was given.")
-    rows = []
-    for r in (R1, R2, R3):
-        rows.append([r["name"].split(":")[0], f"{r['lane_spacing_m']:.1f}", f"{r['n_lanes']}",
-                     f"{r['n_waypoints']}", f"{r['plan_path_m']:.2f}",
-                     f"{r['mpc_xy_vel_max']:.1f}" + ("" if r["cap_confirmed"] else " [TO CONFIRM: from .ulg]"),
-                     f"{r['align_deg']:+.2f}"])
-    R.table("runs", "Configuration of the three demonstration flights (11 November 2026).",
-            ["Run", "Max lane spacing (m)", "Lanes", "Way-points", "Planned sweep length (m)",
-             "MPC_XY_VEL_MAX (m/s)", "Plan rotation at alignment (°)"],
-            rows, widths_cm=[1.6, 2.2, 1.5, 1.8, 2.6, 3.6, 2.7],
-            align=["l", "c", "c", "c", "c", "c", "c"])
+        f"**Speed and tracking.** The median lane speed was {pct(R1):.0f} % of the limit in "
+        f"Run 1 and {pct(R2):.0f} % in Run 2. At 1.5 m/s the 4.6 m lanes were too short to reach "
+        f"a steady cruise. The cross-track error grew from {cm(R1['xt_rms_all_m'])} to "
+        f"{cm(R2['xt_rms_all_m'])} RMS, and the worst lane-end overshoot from "
+        f"{cm(R1['overshoot_max_m'])} to {cm(R2['overshoot_max_m'])}. At speed the error is "
+        f"mostly a bias towards the outside of the sweep: the drone enters each lane with "
+        f"sideways momentum, and Eq. (3) leaves little authority to remove it. The heading "
+        f"stayed within ±2°.")
     R.p(
-        "Common to all runs: flight height 0.8 m; waypoint-mode trajectory gate with 15 cm corner "
-        "radius; camera at the firmware default (≈7–10 frames/s, JPEG quality 60, 320 × 240); "
-        "`min_sightings` = 5; drift model `auto`; UWB not used (`uwb.send_to_px4: false`).")
-
-    R.h2("4.2  Mission timeline")
-    R.figure("timeline", FIG / "fig_timeline.png",
-             "Phase durations of the three flights, from the take-off command to the end of the "
-             "landing settle time.")
-    rows = []
-    for r in (R1, R2, R3):
-        rows.append([r["name"].split(":")[0], f"{r['t_explore_s']:.1f}", f"{r['sweep_duration_s']:.1f}",
-                     f"{r['all_tags_after_sweep_start_s']:.1f}", f"{r['return_duration_s']:.1f}",
-                     f"{r['settle_duration_s']:.1f}", f"{r['t_done_s']:.1f}"])
-    R.table("timeline", "Mission timing (s). Times are from the take-off command unless stated.",
-            ["Run", "Sweep starts", "Sweep duration", "All tags confirmed (from sweep start)",
-             "Return flight", "Precision-landing hold", "Mission complete"],
-            rows, widths_cm=[1.6, 2.0, 2.2, 3.4, 2.2, 2.6, 2.4], align=["l"] + ["c"] * 6)
-    R.p(
-        f"Take-off to a confirmed hover took 10–16 s in every run. In Run 2 the operator typed "
-        f"`start` at 10.1 s, but the hover was only confirmed at {R2['t_hover_confirmed_s']:.1f} s, "
-        f"because the position had to stay within 10 cm for 2 s. The supervisor correctly held the "
-        f"sweep until then. The sweep itself shrank from {R1['sweep_duration_s']:.1f} s to "
-        f"{R2['sweep_duration_s']:.1f} s and {R3['sweep_duration_s']:.1f} s. With fixed take-off, "
-        f"return and landing overheads of 30–34 s, the total mission time fell from "
-        f"{R1['t_done_s']:.1f} s to {R3['t_done_s']:.1f} s (−48 %). In Runs 1 and 3 the "
-        f"precision-landing hold ran to its 10 s limit (Section 4.8).")
-
-    R.h2("4.3  Flight paths")
-    R.p(
-        f"{F('path1')}–{F('path3')} show each flight in the PX4 frame as flown, next to the same "
-        "route after drift correction in the arena frame. The planned path is drawn after the "
-        "alignment rotation, from the hover point through the lane ends. In every run the drone "
-        "followed the planned sequence of lanes, passed all waypoints, and returned over the "
-        "home tag. The trajectory never triggered the geofence or any other safety layer.")
-    for i, r in enumerate((R1, R2, R3), 1):
-        R.figure(f"path{i}", FIG / f"fig_path_run{i}.png",
-                 f"{r['name']} (MPC_XY_VEL_MAX = {r['mpc_xy_vel_max']:.1f} m/s"
-                 + ("" if r["cap_confirmed"] else ", to be confirmed") + "). Left: PX4 frame "
-                 "with the planned path, raw tag estimates and raw localisation-tag visits. "
-                 "Right: drift-corrected route and tags with the surveyed localisation tags.",
-                 width_cm=15.5)
-
-    R.h2("4.4  Speed and path-tracking performance")
-    R.figure("speed", FIG / "fig_speed.png",
-             "Ground speed (from 10 Hz position telemetry, ±0.2 s central difference) during "
-             "the sweep and the return, with the PX4 horizontal speed limit.")
-    R.p(
-        f"The speed traces in {F('speed')} confirm that in waypoint mode the speed limit, and not "
-        f"the planned trajectory speed, sets the cruise speed. The median lane speed was "
-        f"{R1['speed_cruise_median_mps']:.2f}, {R2['speed_cruise_median_mps']:.2f} and "
-        f"{R3['speed_cruise_median_mps']:.2f} m/s, i.e. 74 %, 70 % and 83 % of the limit. The drone "
-        f"never exceeded the limit (maxima {R1['speed_max_mps']:.2f}, {R2['speed_max_mps']:.2f} and "
-        f"{R3['speed_max_mps']:.2f} m/s). At 1.5 m/s the 4.6 m lanes became too short to hold a "
-        f"cruise: the trace in Run 3 is a sequence of acceleration-deceleration peaks, one per leg.")
-    rows = []
-    for r in (R1, R2, R3):
-        for l in r["lanes"]:
-            rows.append([r["name"].split(":")[0], f"{l['lane']}", f"{l['duration_s']:.1f}",
-                         f"{l['xt_mean_m'] * 100:+.1f}", f"{l['xt_rms_m'] * 100:.1f}",
-                         f"{l['xt_max_m'] * 100:.1f}", f"{l['overshoot_m'] * 100:.1f}"])
-    R.table("tracking", "Cross-track error on each lane (excluding 0.3 m at each end) and overshoot "
-            "past the lane end. Positive mean = right of the direction of travel.",
-            ["Run", "Lane", "Lane time (s)", "Mean (cm)", "RMS (cm)", "Max |e| (cm)",
-             "Overshoot (cm)"],
-            rows, widths_cm=[1.8, 1.4, 2.4, 2.4, 2.4, 2.6, 2.6], align=["l"] + ["c"] * 6)
-    R.p(
-        f"Path tracking degrades steadily with speed ({T('tracking')}). The overall RMS cross-track "
-        f"error grew from {cm(R1['xt_rms_all_m'])} to {cm(R2['xt_rms_all_m'])} and "
-        f"{cm(R3['xt_rms_all_m'])}, and the worst lane-end overshoot from "
-        f"{cm(R1['overshoot_max_m'])} to {cm(R3['overshoot_max_m'])}. In the fast runs the error is "
-        f"mostly a *bias*, not noise: the mean error is close to the RMS, and it always lies on the "
-        f"outside of the sweep. The mechanism follows from Eq. (3). The drone arrives at each lane "
-        f"start carrying momentum from the transit leg. Once it is within 15 cm of the corner, the "
-        f"setpoint jumps to the far end of the lane. The resulting error vector is almost entirely "
-        f"along the lane, so PX4's norm-limited velocity demand leaves only a few cm/s to remove the "
-        f"sideways offset. The offset therefore persists for most of the lane. Since the outer lanes "
-        f"lie only 0.3 m inside the area boundary, a 27 cm outward bias at 1.5 m/s brings the "
-        f"drone close to the edge of the area. The heading stayed within "
-        f"{min(r['sweep_heading_min_deg'] for r in (R1, R2, R3)):+.1f}° to "
-        f"{max(r['sweep_heading_max_deg'] for r in (R1, R2, R3)):+.1f}° during all sweeps, "
-        f"so yaw control did not contribute to the error.")
-
-    R.h2("4.5  Tag detection performance")
-    rows = []
-    for r in (R1, R2, R3):
-        for t in r["tags"]:
-            rows.append([r["name"].split(":")[0], f"{t['tag_id']}", f"{t['n_sightings']}",
-                         f"{t['seen_for_s']:.1f}", f"{t['speed_while_seen_mps']:.2f}",
-                         f"{t['confirm_delay_s']:.2f}", f"{t['decision_margin_median']:.0f}",
-                         f"{t['range_median_m']:.2f}"])
-    R.table("tags", "Detection statistics for each search tag.",
-            ["Run", "Tag", "Sightings", "In view (s)", "Mean speed in view (m/s)",
-             "First seen → confirmed (s)", "Median decision margin", "Median range (m)"],
-            rows, widths_cm=[1.6, 1.2, 1.9, 1.7, 2.3, 2.6, 2.4, 2.1], align=["l"] + ["c"] * 7)
-    R.p(
-        "The same three search tags (IDs 2, 4 and 6) were confirmed in every run, and no false tag "
-        "was confirmed. Each tag was confirmed 0.3–0.5 s after it was first seen, which corresponds "
-        "to five consecutive frames at the camera's 7–10 frames/s. The measured range "
-        "of 0.70–0.86 m agrees with the 0.8 m flight height, which is an independent check of the "
-        "camera model and the tag size.")
-    R.figure("sightings", FIG / "fig_sightings.png",
-             "Accepted sightings per search tag in each run. The dashed line is the confirmation "
-             "threshold of five sightings.")
-    R.p(
-        f"The number of sightings per tag fell roughly in proportion to speed ({F('sightings')}): "
-        f"from 24–41 in Run 1 to 6–13 in Run 3. A tag stays in the 1.25 m long footprint for "
-        f"about 1.25 / v seconds, giving roughly f · 1.25 / v frames at a frame rate f. At "
-        f"1.3 m/s and 7–10 frames/s this is only 7–10 frames, of which tag 4 yielded six accepted sightings, one above the "
-        f"confirmation threshold. The median decision margin also fell from about 100–108 to "
-        f"82–97 in Run 3, consistent with motion blur at higher speed. Run 3 was therefore "
-        f"close to the detection limit of the current camera configuration. A further speed increase "
-        f"would have risked unconfirmed tags.")
-    R.p(
-        f"The localisation tags show the same trend more sharply. In the truncated sweeps tag 24 "
-        f"(between the two lanes at the far end) was visible only from the transit leg, and "
-        f"tag 23 lay 0.62 m from the nearer lane, at the edge of the footprint. They gave "
-        f"{R2['detections_by_id'].get('24', 0)} and {R2['detections_by_id'].get('23', 0)} "
-        f"sightings in Run 2, and none in Run 3. Tag 25 gave {R3['detections_by_id'].get('25', 0)} "
-        f"sightings in Run 3, below the five needed for a fix. This directly weakened the drift "
-        f"correction of Run 3 (Section 4.7).")
-
-    R.h2("4.6  Tag position estimates and run-to-run consistency")
+        f"**Detection.** Each tag was confirmed 0.3–0.5 s after it first appeared (five frames "
+        f"at 7–10 frames/s). The measured range of 0.70–0.86 m agrees with the 0.8 m flight "
+        f"height. Sightings per tag fell with speed, from {sight(R1)} to {sight(R2)}. In Run 2, "
+        f"tag 4 was confirmed with one sighting to spare, close to the camera's limit.")
     rows = []
     for tid in ("2", "4", "6"):
-        for r in (R1, R2, R3):
+        cells = [tid]
+        for r in runs:
             t = next(t for t in r["tags"] if str(t["tag_id"]) == tid)
-            rows.append([tid, r["name"].split(":")[0], f"({t['raw_x']:.3f}, {t['raw_y']:.3f})",
-                         f"({t['corr_x']:.3f}, {t['corr_y']:.3f})", f"{t['shift_m'] * 100:.1f}"])
-    R.table("positions", "Reported tag positions (x, y) in metres: raw PX4 frame and drift-corrected "
-            "arena frame.",
-            ["Tag", "Run", "Raw PX4 frame", "Corrected (arena)", "Correction (cm)"],
-            rows, widths_cm=[1.4, 1.8, 4.6, 4.6, 3.0], align=["c", "l", "c", "c", "c"])
-    R.figure("repeat", FIG / "fig_repeatability.png",
-             "Run-to-run scatter of each tag estimate. Hollow markers: raw PX4 frame; filled: "
-             "drift-corrected arena frame; thin lines join the two estimates of the same run.")
-    d = DISP
+            cells.append(f"({t['corr_x']:.2f}, {t['corr_y']:.2f})")
+        d = DISP[tid]
+        cells.append(f"{d['raw']['max_pairwise_m'] * 100:.1f} → {d['corr']['max_pairwise_m'] * 100:.1f}")
+        rows.append(cells)
+    R.table("positions", "Reported tag positions (x, y) in metres after drift correction, and "
+            "the distance between the two runs' estimates before → after correction.",
+            ["Tag", "Run 1", "Run 2", "Run 1 to Run 2 (cm)"], rows,
+            widths_cm=[1.6, 4.4, 4.4, 5.6], align=["c"] * 4)
     R.p(
-        "The surveyed positions of the search tags on demonstration day were not available when this "
-        "draft was written, so absolute accuracy cannot yet be stated. The reference values "
-        "stored in `config.yaml` (`truth_tags`) belong to an earlier test layout and are deliberately "
-        "*not* used. Repeatability across the three flights is nevertheless a strong indicator, "
-        "because the tags did not move between runs while the drift differed in every run. "
-        f"Without correction, the three estimates of each tag scattered by "
-        f"{cm(d['2']['raw']['rms_from_mean_m'])}, {cm(d['4']['raw']['rms_from_mean_m'])} and "
-        f"{cm(d['6']['raw']['rms_from_mean_m'])} RMS about their mean (tags 2, 4 and 6), with "
-        f"worst pairwise differences up to {cm(d['6']['raw']['max_pairwise_m'])}. After correction "
-        f"the scatter fell to {cm(d['2']['corr']['rms_from_mean_m'])}, "
-        f"{cm(d['4']['corr']['rms_from_mean_m'])} and {cm(d['6']['corr']['rms_from_mean_m'])}. "
-        f"The correction brought the estimates of tags 2 and 4 into agreement within "
-        f"{cm(d['2']['corr']['max_pairwise_m'])} and {cm(d['4']['corr']['max_pairwise_m'])}. "
-        f"Tag 6, in the far corner diagonally opposite the area's start, retained the largest "
-        f"scatter, and the corrected estimate of Run 3 is the outlier ({F('repeat')}).")
-    R.todo("Insert the surveyed positions of tags 2, 4 and 6 for the demonstration layout, then "
-           "re-run `python mission/tools/relocalise.py <run> --truth \"2:x,y 4:x,y 6:x,y\"` for "
-           "each run and add a table of absolute errors (raw and corrected) here. "
-           "If more than three search tags were placed in the area, state which were missed and why.")
+        f"**Localisation.** The tags did not move between flights but the drift differed, so the "
+        f"distance between the two runs' estimates measures repeatability. Correction brought "
+        f"the estimates of tags 2 and 4 within {cm(DISP['2']['corr']['max_pairwise_m'])} and "
+        f"{cm(DISP['4']['corr']['max_pairwise_m'])} of each other ({T('positions')}). Before "
+        f"correction, PX4 was off by {cm(R1['loc_raw_err_mean_m'])} on average at the "
+        f"localisation tags in Run 1. Run 1's nine fixes gave a scale of "
+        f"{R1['loc_fit']['scale']:.3f}, i.e. PX4 over-estimated distance by about 2.2 %. Run 2's "
+        f"three fixes barely determine the four-parameter fit, and its scale of "
+        f"{R2['loc_fit']['scale']:.3f} is implausible. This is why tag 6 still differs by "
+        f"{cm(DISP['6']['corr']['max_pairwise_m'])}. On return the home tag was "
+        f"{R1['land_first_offset_cm']:.0f} and {R2['land_first_offset_cm']:.0f} cm from where PX4 "
+        f"placed it. Precision landing reduced this to {R1['land_final_offset_cm']:.0f} and "
+        f"{R2['land_final_offset_cm']:.0f} cm.")
+    R.todo("Absolute error of each tag against its surveyed demonstration position, and the "
+           "number of search tags in the area.")
+    R.p(
+        f"**Speed versus coverage.** Run 2 confirmed all tags "
+        f"{R2['all_tags_after_sweep_start_s']:.1f} s into the sweep, against "
+        f"{R1['all_tags_after_sweep_start_s']:.1f} s, and cut the mission time from "
+        f"{R1['mission_time_s']:.1f} s to {R2['mission_time_s']:.1f} s. However, its two lanes "
+        f"2.62 m apart never image a central strip about 1.2 m wide. It found every tag only "
+        f"because these tags lay near the outer lanes, so only Run 1 is a complete search.")
 
-    R.h2("4.7  Odometry drift and localisation-tag correction")
-    rows = []
-    for r in (R1, R2, R3):
-        f = r["loc_fit"]
-        rows.append([r["name"].split(":")[0].replace("Run ", ""), f"{f['n_fixes']}",
-                     ", ".join(str(i) for i in r["loc_ids_fixed"]),
-                     f"{r['loc_raw_err_mean_m'] * 100:.1f} / {r['loc_raw_err_max_m'] * 100:.1f}",
-                     f"{f['turn_deg']:+.2f}", f"{f['scale']:.3f}",
-                     f"({f['shift_x']:+.2f}, {f['shift_y']:+.2f})", f"{f['rms_m'] * 100:.1f}",
-                     f"{f['loo_global_cm']:.1f} / {f['loo_time_cm']:.1f} / {f['loo_hybrid_cm']:.1f}"])
-    R.table("locfit", "Drift at the localisation tags and the fitted correction.",
-            ["Run", "Fixes", "Tags fixed", "Raw error mean / max (cm)", "Turn (°)", "Scale",
-             "Shift (m)", "Fit RMS (cm)", "Leave-one-out global / time / hybrid (cm)"],
-            rows, widths_cm=[1.1, 1.4, 2.5, 2.2, 1.4, 1.4, 2.4, 1.5, 2.4], align=["c"] * 9)
-    R.figure("loc", FIG / "fig_loc.png",
-             "Position error at each localisation-tag visit (L<ID>.<visit>) before correction "
-             "(raw PX4 estimate against the surveyed position) and after the global similarity fit.")
-    R.p(
-        f"Uncorrected, PX4's position at the localisation tags was in error by "
-        f"{cm(R1['loc_raw_err_mean_m'])} on average in Run 1 and {cm(R2['loc_raw_err_mean_m'])} in "
-        f"Run 2, with maxima of {cm(R1['loc_raw_err_max_m'])} and {cm(R2['loc_raw_err_max_m'])} "
-        f"({T('locfit')}). This is consistent with the run-to-run scatter of the raw tag estimates. "
-        f"Runs 1 and 2 independently estimated almost the same scale factor (0.978), i.e. "
-        f"PX4 over-estimated distances by about 2.2 %. The fitted frame rotation of −2.4° to −3.8° "
-        f"has the sign and size expected from the placement error measured at the take-off "
-        f"alignment (+2.65° and +4.95°). The repeated scale suggests a systematic "
-        f"optical-flow or rangefinder scale error that could be calibrated out on the flow sensor "
-        f"itself. In Runs 1 and 2 the hybrid model predicted held-out visits to "
-        f"{R1['loc_fit']['loo_hybrid_cm']:.1f} cm and {R2['loc_fit']['loo_hybrid_cm']:.1f} cm.")
-    R.p(
-        f"Run 3 shows the limits of the method. With only three fixes (tag 29 twice and tag 22 once) "
-        f"for a four-parameter model, the fit is nearly exact (RMS {R3['loc_fit']['rms_m'] * 100:.1f} cm, "
-        f"residual at tag 22 below 1 mm) but poorly determined. The fitted scale of "
-        f"{R3['loc_fit']['scale']:.3f} contradicts the 0.978 of the other runs, and the leave-one-out "
-        f"error rose to {R3['loc_fit']['loo_hybrid_cm']:.1f} cm. The larger correction applied to "
-        f"tag 6 in Run 3 should therefore be treated with caution. A sweep that is fast and sparse "
-        f"collects fewer fixes, and drift correction depends on those fixes.")
 
-    R.h2("4.8  Return to home and precision landing")
-    rows = []
-    for r in (R1, R2, R3):
-        rows.append([r["name"].split(":")[0], f"{r['return_duration_s']:.1f}",
-                     f"{r['land_first_offset_cm']:.0f}", f"{r['land_targets']}",
-                     f"{r['land_correction_moves']}", f"{r['settle_duration_s']:.1f}",
-                     f"{r['land_final_offset_cm']:.0f}"])
-    R.table("landing", "Return and precision landing on the home tag.",
-            ["Run", "Return flight (s)", "Home-tag offset on arrival (cm)", "Landing targets set",
-             "Correction moves", "Hold before landing (s)", "Offset at land command (cm)"],
-            rows, widths_cm=[1.6, 2.2, 2.8, 2.2, 2.2, 2.4, 2.6], align=["l"] + ["c"] * 6)
+def sec_ai(R: Report):
+    R.h1("6  AI-Assisted Flight-Data Analysis and Visualisation")
     R.p(
-        f"On arrival over the take-off point the home tag appeared 9, 23 and 17 cm away from "
-        f"where PX4 placed it, a direct measurement of the drift accumulated during each flight "
-        f"({T('landing')}). Precision landing reduced the offset to 2–5 cm before the land command "
-        f"in every run, so the drone landed on the start box each time. In Runs 1 and 3 the drone "
-        f"kept making 2–3 cm corrections until the 10 s limit, because the 8 cm acceptance radius "
-        f"is comparable to the hover wobble. This cost about 5 s per flight without improving the "
-        f"result. Raising `land_radius_m` to 0.10 m, or accepting the position after one correction "
-        f"within 2 × the radius, would remove most of this hold.")
+        "Every flight produces two logs. The laptop records events, the 10 Hz telemetry route "
+        "and every detection. PX4's onboard log (ULog) records estimator, controller and sensor "
+        "data at up to several hundred hertz. We used an AI coding assistant "
+        "[TO CONFIRM: tool name] to write Python analysis scripts (pandas, matplotlib, pyulog). "
+        "These computed the metrics and figures in Section 5: lane-by-lane cross-track error, "
+        "speed, sightings, drift fits and run-to-run differences. The team checked each result "
+        "against what was seen in flight. This checking mattered: the first speed estimate "
+        "showed 0.62 m/s under a 0.5 m/s limit, an artefact of differentiating jittery Wi-Fi "
+        "timestamps that smoothing removed. Similarly, an automatic accuracy plot was found to "
+        "use reference tag positions from an earlier layout, so it was left out.")
+    R.p(
+        "**Case study: sudden odometry jumps.** In several trial flights the reported position "
+        "jumped by metres, and the drone lunged or yawed violently. The ULogs of two such "
+        "flights (A and B) showed this was not a sensor fault. The flight controller has two "
+        "IMUs, a BMI088 and a BMI270. With PX4's default setting (`EKF2_MULTI_IMU` = 3) it runs "
+        "one EKF2 instance per IMU and publishes whichever it rates healthier. With no compass, "
+        "nothing measures yaw, so each instance integrates its own gyroscope. In flight the "
+        "BMI270 read about 2°/s less yaw rate than the BMI088 (−2.5°/s in A, −1.8°/s in B), "
+        "while both read near zero at rest. This suggests a vibration-related error. Because "
+        "optical flow is rotated into the world frame using each instance's own heading, the two "
+        f"estimates diverged by 105° and 5.4 m in A, and by over 200° and 6.9 m in B "
+        f"({F('odom_div')}). Each stayed self-consistent, so PX4's health checks saw nothing "
+        "wrong.")
+    R.figure("odom_div", FIG / "fig_odom_divergence.png",
+             "Heading (top) and position (bottom) divergence between the two estimator instances "
+             "in trial flights A and B, until PX4 switched between them.", width_cm=11.5)
+    R.p(
+        "A 60 ms innovation spike on the healthy instance (descent onset in A, touchdown in B) "
+        "made PX4 switch to the drifted one. It then published the whole difference as an "
+        "instant reset: 5.3 m and −106° in A. A was airborne and its setpoints were still in "
+        "the old frame, so the drone yawed at up to 94°/s until an automatic landing and the "
+        "kill switch ended the flight. For the demonstration we gave the BMI088 the highest "
+        "sensor priority and the BMI270 the lowest, so that PX4 falls back to the BMI270 only if "
+        "the BMI088 fails. No jump occurred in any demonstration flight. The blame on "
+        "the BMI270 rests on both IMUs sharing one rigid board and has not been checked against "
+        "an external heading reference.")
+    R.todo("Analysis of the demonstration ULogs: the cause of the lane bias, tilt and motor "
+           "margins at 1.5 m/s, and confirmation that no estimator switch occurred.")
 
-    R.h2("4.9  Discussion")
-    R.h3("Speed versus coverage and accuracy")
-    R.p(
-        "The truncated runs met their aim of finding the known tags faster: all three tags were "
-        f"confirmed {R2['all_tags_after_sweep_start_s']:.1f} s and {R3['all_tags_after_sweep_start_s']:.1f} s "
-        f"after the sweep started, against {R1['all_tags_after_sweep_start_s']:.1f} s for the full "
-        "search. They came, however, at three costs. First, coverage: the two-lane sweep does not "
-        "image the central strip of the area (Section 3.3). It found all tags only because the "
-        "tags in this layout lay close to the outer lanes. Without prior knowledge of the tag "
-        "positions, only Run 1 constitutes a complete search. Second, path tracking: the "
-        "cross-track bias of up to 27 cm at 1.5 m/s reduces the margin to the area boundary and "
-        "shifts the camera footprint. Third, evidence: fewer frames per tag and fewer "
-        "localisation fixes leave both detection and drift correction closer to their limits.")
-    R.p(
-        "For a search with unknown tag positions, the better route to a shorter mission is to keep "
-        "full coverage and recover time elsewhere. Lanes could be spaced at the full effective "
-        "swath of about 1.4 m, giving three lanes instead of four. The speed could be raised "
-        "moderately to about 0.7 m/s, where Run 2 shows that detection and tracking are still "
-        "comfortable. The precision-landing hold could be shortened. Three lanes 1.31 m apart leave "
-        "only about 0.14 m of overlap, which must be checked against the cross-track error at "
-        "that speed. Together these changes would cut the Run 1 mission time by an estimated "
-        "one third while retaining complete coverage. "
-        "[TO CONFIRM: validate by a flight with lane_spacing 1.4 m and MPC_XY_VEL_MAX 0.7 m/s.]")
-    R.h3("Limitations of this analysis")
+
+def sec_limits(R: Report):
+    R.h1("7  Limitations, Failure Cases and Improvements")
     R.bullets([
-        "Positions are PX4 estimates, not ground truth. Path-tracking errors are relative to the "
-        "estimated, not the true, position.",
-        "Absolute tag accuracy awaits the surveyed demonstration layout (Section 4.6).",
-        "The 1.0 m/s speed limit of Run 2 is inferred from the flight data and must be confirmed "
-        "from the onboard parameters (Section 5).",
-        "Speeds are differentiated from 10 Hz Wi-Fi telemetry with occasional gaps of up to "
-        f"{max(r['telemetry_dt_max_s'] for r in (R1, R2, R3)) * 1000:.0f} ms. The higher-rate "
-        "PX4 log will refine them.",
-        "Three flights are too few for statistical conclusions; the trends are, however, "
-        "monotonic and physically explained.",
+        "**Coverage versus speed.** The fast two-lane sweeps miss the centre of the area. "
+        "Three lanes at the full 1.4 m swath and about 0.7 m/s would keep full coverage and "
+        "cut the mission time by an estimated third [TO CONFIRM: not yet flown].",
+        "**Lane-start bias** of up to 27 cm at 1.5 m/s (Eq. 3). Fix: a short velocity "
+        "feed-forward segment after each corner, or an intermediate setpoint on the lane line.",
+        "**Detection margin at speed.** Only 6 sightings for one tag in Run 2. Fix: a higher "
+        "camera frame rate, or a lower speed.",
+        "**Sparse drift fixes.** Run 2's three fixes gave an unreliable correction. Fix: place "
+        "localisation tags under the lanes.",
+        "**Systematic flow scale error** of 2.2 %. Fix: calibrate the flow sensor's scale.",
+        "**Precision-landing hold.** The 8 cm radius is close to the hover wobble, so the drone "
+        "corrected until the 10 s limit in both runs. A 10 cm radius would save about 5 s.",
+        "**Estimator switching (failure case, Section 6).** The robust fix is a single "
+        "estimator instance on the BMI088 (`EKF2_MULTI_IMU` = 0) plus a heading reference, and "
+        "companion software that re-anchors its setpoints when PX4 reports a position reset.",
+        "**No ground truth.** All positions are PX4 estimates corrected by the localisation "
+        "tags. Two flights are too few for statistics, though every trend is consistent and "
+        "explained.",
     ])
 
 
-def sec_ulog(R: Report):
-    R.h1("5  Black-Box Flight Log Analysis (PX4 ULog)")
-    R.todo(
-        "This section is a framework awaiting the PX4 ULog files of the three demonstration flights "
-        "(11 November 2026, approximately 11:13, 11:22 and 11:29 local time). Download them from the "
-        "flight controller's SD card (QGroundControl → Analyze Tools → Log Download), place them in "
-        "`report/data/ulog/`, and follow `report/AGENT_NOTES.md`, Section 5, to fill in each subsection.")
-    R.h2("5.1  Purpose and data source")
+def sec_note(R: Report):
+    R.h1("8  Note to the Teaching Team")
     R.p(
-        "The laptop logs record what the drone *reported* over Wi-Fi at about 10 Hz. The PX4 "
-        "ULog records the flight controller's internal state at rates of up to several hundred "
-        "hertz: setpoints, estimates, sensor data, controller outputs, estimator health and "
-        "power. It is therefore the authoritative source for verifying the controller "
-        "behaviour inferred in Section 4 and for examining aspects that are invisible from the "
-        "laptop: attitude control, the optical-flow fusion, motor saturation and battery sag. "
-        "The flights are to be identified in the ULogs by their OFFBOARD segments (navigation "
-        "state 14) and aligned with the mission logs using the take-off command time.")
-    R.h2("5.2  Findings from a pre-demonstration log")
-    R.p(
-        "A ULog from an earlier test flight (≈65 s, offboard sweep at 0.4 m/s with step position "
-        "setpoints) was analysed before the demonstration (`cde1302/px4-flight-log-findings.md`). "
-        "Its findings shaped the final configuration:")
-    R.bullets([
-        "**Cross-track correction is limited by the speed cap** when position setpoints are "
-        "distant steps (Eq. 3): 0.35–0.4 m off-axis errors persisted along every leg. This motivated "
-        "the follow mode (Section 3.5) and explains the bias measured in Section 4.4.",
-        "**No heading reference:** with `EKF2_MAG_TYPE` = None the yaw is gyroscope-integrated; "
-        "the EKF's own yaw standard deviation grew from about 3.7° to 5.1° in 60 s. This "
-        "motivated the take-off alignment to the home tag and short flight times.",
-        "**Rate and attitude loops were not the bottleneck** (attitude standard deviation ≈1°); "
-        "the vehicle is strongly over-powered (hover throttle ≈0.155).",
-        "**Optical-flow fusion was healthy** (innovation ≈0.1 rad/s RMS, test ratios ≤0.14) at "
-        "≈0.47 m height. Flying at 0.8 m in the demonstration reduced the relative effect "
-        "of rangefinder error by about 40 %.",
-        "**Parameter clean-up needed:** external-vision and GPS fusion were still enabled without a "
-        "source, logging (`SDLOG_PROFILE` 161) was too sparse for estimator analysis, and an RC "
-        "roll trim offset blocked auto-tuning.",
-    ])
-    R.p(
-        "A further log from 10 November 2026 (`cde1302/log_185_UnknownDate.ulg`, 2 min 25 s, "
-        "MicoAir H743 V2, PX4 v1.15.4) is also available. It records `MPC_XY_VEL_MAX` = 0.5 m/s, "
-        "`MPC_XY_P` = 1.3, `MPC_ACC_HOR` = 3.0 m/s², `EKF2_EV_CTRL` = 0 and `SDLOG_PROFILE` = 161. "
-        "It precedes the demonstration and is not one of the three flights analysed here.")
-    R.h2("5.3  Parameter verification")
-    R.table("ulog_params", "PX4 parameters to be read from each demonstration ULog "
-            "([TBC] = to be completed from the log).",
-            ["Parameter", "Run 1", "Run 2", "Run 3", "Relevance"],
-            [["MPC_XY_VEL_MAX", "0.5", "1.0 [TBC]", "1.5", "Cruise speed in waypoint mode"],
-             ["MPC_XY_CRUISE", "[TBC]", "[TBC]", "[TBC]", "Auto-mode cruise speed"],
-             ["MPC_ACC_HOR, MPC_ACC_HOR_MAX", "[TBC]", "[TBC]", "[TBC]", "Lane-end overshoot"],
-             ["MPC_XY_P, MPC_XY_VEL_P_ACC", "[TBC]", "[TBC]", "[TBC]", "Cross-track correction"],
-             ["EKF2_OF_CTRL, EKF2_HGT_REF", "[TBC]", "[TBC]", "[TBC]", "Estimator sources"],
-             ["EKF2_EV_CTRL", "[TBC]", "[TBC]", "[TBC]", "Confirms UWB not fused"],
-             ["SDLOG_PROFILE", "[TBC]", "[TBC]", "[TBC]", "Logged topics and rates"]],
-            widths_cm=[5.0, 1.8, 2.2, 1.8, 5.1], align=["l", "c", "c", "c", "l"])
-    R.h2("5.4  Position and velocity tracking")
-    R.todo("Plot `trajectory_setpoint` against `vehicle_local_position` (x, y, vx, vy) for each "
-           "sweep. Report the cross-track and along-track errors per lane at the controller rate, "
-           "and compare them with Table " + str(TABS.index("tracking") + 1) + ". Check whether "
-           "the horizontal velocity setpoint saturates at MPC_XY_VEL_MAX during lanes, and how "
-           "much of it is directed across the lane (verification of Eq. 3).")
-    R.image_placeholder("ulog_track", "Setpoint versus estimate, x and y, Run 1 and Run 3 "
-                        "(to be generated by report/analyse_ulog.py).",
-                        "PX4 position tracking during the sweep.")
-    R.h2("5.5  Attitude and rate control")
-    R.todo("Compare `vehicle_attitude_setpoint` with `vehicle_attitude` (roll, pitch) and "
-           "`vehicle_rates_setpoint` with `vehicle_angular_velocity`. Report the peak tilt in "
-           "each run (expected to rise with speed and at lane ends), RMS attitude tracking "
-           "error, and any actuator saturation (`actuator_motors`, `control_allocator_status`).")
-    R.image_placeholder("ulog_att", "Roll and pitch, setpoint versus estimate, for the three runs.",
-                        "Attitude tracking.")
-    R.h2("5.6  Estimator (EKF2) health")
-    R.todo("From `estimator_status`, `estimator_innovations`, `estimator_optical_flow_vel` and "
-           "`distance_sensor`: optical-flow quality and innovation test ratios against speed, "
-           "range-finder height and its noise, yaw variance growth over each flight, and any "
-           "position resets (`vehicle_local_position.xy_reset_counter`). Relate the growth of "
-           "the yaw variance to the frame rotation found by the drift fit (Table "
-           + str(TABS.index("locfit") + 1) + ").")
-    R.image_placeholder("ulog_ekf", "Optical-flow quality, innovation test ratio and height for "
-                        "the three runs.", "EKF2 estimator health.")
-    R.h2("5.7  Power, thrust margin and vibration")
-    R.todo("From `battery_status` and `actuator_motors`: voltage sag and current at hover and at "
-           "peak speed, mean motor output (thrust margin), and from `sensor_combined` or "
-           "`vehicle_imu_status` the vibration level. State the energy used per flight.")
-    R.h2("5.8  Summary of black-box findings")
-    R.table("ulog_plan", "Questions the ULog analysis is to answer.",
-            ["Question", "Topic(s)", "Answer"],
-            [["Was MPC_XY_VEL_MAX = 1.0 m/s in Run 2?", "parameters", "[TO BE COMPLETED]"],
-             ["Is the outward lane bias caused by norm-limited velocity demand?",
-              "trajectory_setpoint, vehicle_local_position", "[TO BE COMPLETED]"],
-             ["Did tilt or motor output approach limits at 1.5 m/s?",
-              "vehicle_attitude, actuator_motors", "[TO BE COMPLETED]"],
-             ["Did optical-flow quality drop at higher speed?", "estimator_optical_flow_vel",
-              "[TO BE COMPLETED]"],
-             ["Does the yaw variance explain the fitted frame rotation?", "estimator_states",
-              "[TO BE COMPLETED]"]],
-            widths_cm=[6.4, 5.2, 4.4])
-
-
-def sec_extras(R: Report):
-    R.h1("6  [EXTRAS] Additional Work Beyond the Mission Scope")
-    R.p(
-        "The work in this section was carried out by the group in addition to the mission "
-        "requirements. The mission software does not depend on it, and the UWB system was "
-        "not used in the demonstration flights.")
-
-    R.h2("6.1  [EXTRAS] Redesigned 3D-printed frame")
-    R.p(
-        "The course frame was designed to be cut from carbon-fibre plate but is printed in PLA, "
-        "which is roughly 20–30 times less stiff. The printed frame flexed visibly under load. "
-        "The group therefore redesigned the frame for fused-deposition printing. The goals were "
-        "stiffer arms, faster assembly and no print supports. The design is in `mechanical/` "
-        "(STEP assembly and STL parts; source repository `github.com/eggsacc/CDE1302-drone-frame`).")
-    R.p(
-        "Bending stiffness scales with the second moment of area, which for a rectangular section "
-        "of width b and depth t is")
-    R.equation("I = b · t³ / 12", 7)
-    R.p(
-        "Stiffness therefore grows with the cube of the section depth. The new arms move material "
-        "away from the bending axis into deep top and bottom lattices held apart by thin triangular "
-        "trusses. This gives a much deeper section for about the same mass. In simulation under "
-        f"the same 30 N·m bending load, the maximum deflection fell from 14.4 mm to 5.31 mm "
-        f"(−63 %) ({T('frame')}).")
-    R.table("frame", "Original and redesigned frames.",
-            ["Property", "Original (course)", "Redesign"],
-            [["Maximum deflection, 30 N·m bending (PLA, simulated)", "14.4 mm", "5.31 mm (−63 %)"],
-             ["Assembly time", "≈1 h", "≈15 min"],
-             ["Print supports", "Needed", "None"],
-             ["Print time", "≈3.5 h", "≈3.5 h"],
-             ["Printed frame mass", "≈50 g", "≈50 g"],
-             ["All-up mass with battery", "—", "≈224 g"]],
-            widths_cm=[7.6, 4.0, 4.4])
-    R.p(
-        "Further features: splayed, replaceable landing feet that absorb landing impact (they "
-        "replace nylon spacers that often came loose); press-fit nut retainers so stand-offs fit "
-        "without tools; a battery-strap pass-through under the flight controller; modelled wire "
-        "channels that keep leads away from the propellers; and a cover for the MTF-02P sensor. "
-        "Every part respects the printing limits of PLA, which are bridges up to about 20 mm and "
-        "overhangs below about 55°. The propeller guards bridge at most 16 mm and use 45° "
-        "chamfers in place of flat overhangs. Small supports that cannot be avoided are modelled "
-        "into the main frame as separate bodies that are imported together. All parts fit on one "
-        "256 × 256 mm build plate.")
-    R.figure("frame", ROOT.parent / "mechanical" / "assets" / "frame_render.png",
-             "Rendering of the redesigned frame.", width_cm=12.0)
-    R.image_placeholder("frame_sim", "Bending simulation of the original and the redesigned frame "
-                        "(deflection colour maps), and the arm cross-sections.",
-                        "Structural comparison of the two frames.")
-
-    R.h2("6.2  [EXTRAS] Electrical integration and networking")
-    R.p(
-        "The XIAO ESP32-S3 Sense is connected to a telemetry port of the flight controller: "
-        "ESP32 GPIO5 (D4, TX) to the flight controller's RX and GPIO4 (D3, RX) to its TX, at "
-        "921 600 baud. The MTF-02P is connected to the flight controller, which uses it with "
-        "`EKF2_OF_CTRL` enabled and `EKF2_HGT_REF` = range sensor. The laptop and drone share a "
-        "dedicated router with no internet access and static addresses derived from the drone ID "
-        "(drone 192.168.1.(200 + ID), laptop 192.168.1.(100 + ID)). This avoids DHCP delays and "
-        "keeps the 2.4 GHz channel free of other traffic. If the ESP32 loses the router for more "
-        "than about 3 s, the firmware stops the motors. The VL53L5CX time-of-flight ring of the course "
-        "template (obstacle avoidance) is not needed in an obstacle-free area and is compiled out.")
-    R.image_placeholder("wiring", "Wiring diagram or photograph of the assembled electronics.",
-                        "Electrical integration.")
-    R.todo("Complete the component list (motors, ESCs, battery cells and capacity, receiver) and a "
-           "power budget (hover current, expected endurance) from `electrical/README.md`.")
-
-    R.h2("6.3  [EXTRAS] Ultra-wideband (UWB) positioning trial")
-    R.p(
-        "Because optical-flow odometry drifts, a team member evaluated a Nooploop LinkTrack UWB "
-        "system as an absolute horizontal position reference (branches `uwb-testing` and "
-        "`claude-one-shot`; documentation in `cde1302/mission/UWB_*.md` and `UWB_documentation/`). "
-        "A LinkTrack tag on the drone (UART to ESP32 GPIO9 at 921 600 baud, NODE_FRAME2 protocol, "
-        "50 Hz) ranged to four anchors placed around the arena.")
-    R.h3("Method")
-    R.p(
-        "The integration is *loosely coupled*. The UWB module computes its own x–y position, "
-        "which is fed to PX4 as an external-vision position measurement and fused by EKF2 with "
-        "the IMU and optical flow. UWB and PX4 use different frames: the UWB frame has its origin "
-        "at anchor A0, z up and axes set by the anchors, while the PX4 frame has its origin at "
-        "power-up and z down. A 2-D rigid alignment with a mirror term is therefore estimated in "
-        "flight:")
-    R.equation("p_PX4 = R(θ) · M · p_UWB + t", 8)
-    R.p(
-        "where M flips the y-axis (z-up to z-down). While the drone flies the first part of the "
-        "sweep (at least 0.8 m of path, 50 matched samples), the laptop pairs UWB fixes with PX4 "
-        "positions streamed by the ESP32. It solves Eq. (8) by least squares with one outlier-"
-        "rejection pass and sends the result to the ESP32 (`CMD_UWB_ALIGN`). The ESP32 then "
-        "transforms every UWB fix itself and sends it to PX4 at 20 Hz with its reported precision, "
-        f"so the laptop is no longer in the loop. The PX4 parameters used are listed in "
-        f"{T('uwb_params')}.")
-    R.table("uwb_params", "PX4 parameters for UWB fusion (trial only).",
-            ["Parameter", "Value", "Purpose"],
-            [["EKF2_EV_CTRL", "1", "Fuse horizontal position only"],
-             ["EKF2_EV_NOISE_MD", "0", "Use the precision reported with each fix"],
-             ["EKF2_EVP_NOISE", "0.15 m", "Lower bound on the assumed fix error"],
-             ["EKF2_EVP_GATE", "3 SD", "Reject inconsistent fixes"],
-             ["EKF2_EV_DELAY", "50 ms", "Measurement latency"],
-             ["EKF2_EV_POS_X / Y / Z", "−0.04 / 0 / 0.03 m", "Antenna offset from the flight controller"]],
-            widths_cm=[4.6, 4.0, 7.4])
-    R.h3("Results and decision")
-    R.p(
-        "On the `uwb-testing` branch the alignment was first obtained from a dedicated 1 m "
-        "calibration square (`simple_uwb_calibration.py`, fit accepted below 0.10 m RMS), and "
-        "later solved during the sweep itself. The UWB feed to PX4 was flown and worked. Static "
-        "fixes scattered by 5–7 cm. In some flights, however, the drone pulled sideways near the "
-        "far end of the area. The suspected causes were the estimator restarting the UWB fusion "
-        "and poorer anchor coverage there. A continuous-alignment "
-        "fix was implemented but not flown. More fundamentally, in an arena of about "
-        "5 m × 3 m the optical-flow drift over a one-minute flight is itself only of order "
-        "10–25 cm (Section 4.7). That is comparable to the UWB noise and anchor-geometry errors, "
-        "so the measurable benefit was insignificant. The localisation-tag correction achieved "
-        "comparable consistency with no extra hardware and no risk of in-flight position jumps. UWB "
-        "was therefore disabled for the demonstration (`uwb.send_to_px4: false`; the firmware "
-        "feature remains compiled in but inactive without an alignment).")
-    R.table("uwb_cmp", "UWB trial results.",
-            ["Metric", "Optical flow only", "Optical flow + UWB"],
-            [["Return-to-home error", "[TO BE COMPLETED]", "[TO BE COMPLETED]"],
-             ["Drift at far end of area", "[TO BE COMPLETED]", "[TO BE COMPLETED]"],
-             ["Lane cross-track RMS", "[TO BE COMPLETED]", "[TO BE COMPLETED]"],
-             ["Position resets / jumps", "[TO BE COMPLETED]", "[TO BE COMPLETED]"]],
-            widths_cm=[6.0, 5.0, 5.0])
-    R.todo("Add the UWB trial results from the teammate's flights (e.g. `tools/compare_flights.py` "
-           "output on the uwb-testing logs) and a photo of the anchor layout.")
-    R.image_placeholder("uwb_setup", "UWB anchor layout around the arena and tag mounting on the "
-                        "drone.", "UWB trial set-up.")
+        "We saw severe odometry drift and sudden position and velocity snaps many times in "
+        "trials. For a long time we blamed tuning or our own code. Section 6 shows that at "
+        "least two came from the flight controller's default configuration. With two IMUs, no "
+        "compass and PX4's default `EKF2_MULTI_IMU` = 3, PX4 can silently switch to an estimate "
+        "whose heading has drifted by 100° or more. Nothing in QGroundControl or the telemetry "
+        "warns of this. Other groups on the same board are probably exposed and may mistake it "
+        "for a control bug. We suggest that the course baseline either run a single estimator "
+        "on the BMI088 or set the IMU priorities as we did, and that the companion template "
+        "handle PX4's position-reset counter.")
 
 
 def sec_conclusion(R: Report):
-    R.h1("7  Conclusions and Future Work")
+    R.h1("9  Conclusion")
     R.p(
-        "The group built a pseudo-autonomous search system that takes off, sweeps an allocated area, "
-        "detects and localises floor-mounted AprilTags, returns and lands on its start marker without "
-        "operator steering. Three demonstration flights all completed the mission and located the "
-        "same three search tags (IDs 2, 4 and 6), with no false confirmations and no safety intervention. The design "
-        "choices that mattered most were:")
-    R.bullets([
-        "executing the whole sweep on board, so that Wi-Fi latency and drops do not affect the "
-        "flight path;",
-        "tagging each camera frame with the PX4 pose on the drone's own clock, so that "
-        "transmission delay does not bias tag positions;",
-        "robust median-based clustering with a five-sighting confirmation rule;",
-        "surveyed localisation tags that align the sweep before take-off, guide the landing and "
-        "correct the report for drift. The correction reduced the run-to-run scatter of the "
-        f"reported tag positions from up to {cm(DISP['6']['raw']['rms_from_mean_m'])} RMS to "
-        f"{cm(DISP['4']['corr']['rms_from_mean_m'])}–{cm(DISP['6']['corr']['rms_from_mean_m'])} RMS.",
-    ])
-    R.p(
-        "Raising the speed limit to about 1.5 m/s on a two-lane sweep halved the mission time. It "
-        "did so at the cost of full coverage, a cross-track bias of up to 27 cm, and detection "
-        "and drift correction operating close to their limits. Recommended future work:")
-    R.bullets([
-        "Re-plan for speed with full coverage: about 1.4 m lane spacing at about 0.7 m/s, and a "
-        "shorter precision-landing hold.",
-        "Fix the lane-start bias: either a short velocity feed-forward segment after each corner, or "
-        "an intermediate setpoint on the lane line before the far corner.",
-        "Calibrate the optical-flow scale (both Runs 1 and 2 estimated 2.2 %) and the camera "
-        "intrinsics on the bench (`tools/cam_bench.py`).",
-        "Place localisation tags under the lanes so that every sweep, including sparse ones, "
-        "collects enough fixes.",
-        "Raise the camera frame rate (branch `camera-fps`) to restore the sighting margin at "
-        "higher speed.",
-        "Complete the black-box analysis (Section 5) to confirm the controller-level explanations "
-        "given here.",
-    ])
+        "The system took off, searched, localised the tags, returned and landed on its marker "
+        "in every demonstration flight, with no false detections and no intervention. "
+        "Four decisions mattered most: flying the sweep on board; stamping each frame with its "
+        "pose; robust five-sighting confirmation; and surveyed localisation tags for "
+        "alignment, landing and drift correction. Higher speed roughly halved the mission time, "
+        "but cost coverage, tracking accuracy and detection margin. For a search with unknown "
+        f"tag positions, full coverage at moderate speed is the better trade. Source code: "
+        f"{REPO_URL}.")
 
 
 def sec_refs(R: Report):
     R.h1("References")
     refs = [
-        "E. Olson, \"AprilTag: A robust and flexible visual fiducial system,\" in *Proc. IEEE Int. "
-        "Conf. Robotics and Automation (ICRA)*, 2011, pp. 3400–3407.",
-        "J. Wang and E. Olson, \"AprilTag 2: Efficient and robust fiducial detection,\" in *Proc. "
-        "IEEE/RSJ Int. Conf. Intelligent Robots and Systems (IROS)*, 2016, pp. 4193–4198.",
+        "E. Olson, \"AprilTag: A robust and flexible visual fiducial system,\" in *Proc. IEEE "
+        "ICRA*, 2011, pp. 3400–3407.",
+        "J. Wang and E. Olson, \"AprilTag 2: Efficient and robust fiducial detection,\" in "
+        "*Proc. IEEE/RSJ IROS*, 2016, pp. 4193–4198.",
         "S. Umeyama, \"Least-squares estimation of transformation parameters between two point "
-        "patterns,\" *IEEE Trans. Pattern Analysis and Machine Intelligence*, vol. 13, no. 4, "
-        "pp. 376–380, 1991.",
-        "PX4 Autopilot, *PX4 User Guide (v1.15)*. [Online]. Available: https://docs.px4.io/v1.15/",
-        "MAVLink, *MAVLink Developer Guide*. [Online]. Available: https://mavlink.io/",
-        "Espressif Systems, *ESP-IDF Programming Guide (ESP32-S3)*. [Online]. Available: "
-        "https://docs.espressif.com/projects/esp-idf/",
-        "Nooploop, *LinkTrack P-A Series User Manual*. Included in the repository under "
-        "`UWB_documentation/`.",
-        "[TO BE COMPLETED: CDE1302 course materials (mini-project brief, lab handouts) as required "
-        "by the module's citation style.]",
+        "patterns,\" *IEEE Trans. PAMI*, vol. 13, no. 4, pp. 376–380, 1991.",
+        "PX4 Autopilot, *PX4 User Guide (v1.15)*. https://docs.px4.io/v1.15/",
+        "MAVLink, *MAVLink Developer Guide*. https://mavlink.io/",
+        "Nooploop, *LinkTrack P-A Series User Manual*.",
     ]
     for i, ref in enumerate(refs, 1):
         para = R.doc.add_paragraph()
         para.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        para.paragraph_format.left_indent = Cm(1.0)
-        para.paragraph_format.first_line_indent = Cm(-1.0)
+        para.paragraph_format.left_indent = Cm(0.9)
+        para.paragraph_format.first_line_indent = Cm(-0.9)
+        para.paragraph_format.space_after = Pt(2)
         r = para.add_run(f"[{i}]\t")
         set_font(r)
         add_rich(para, ref)
 
 
-def appendices(R: Report):
-    R.h1("Appendix A  Repository Structure and Branches")
-    R.code([
-        "CDE1302-Autonomous-UAV/",
-        "├── cde1302/",
-        "│   ├── main/       ESP32-S3 firmware",
-        "│   ├── laptop/     course laptop tools",
-        "│   ├── mission/    mission software, tests",
-        "│   └── components/ MAVLink, esp-apriltag",
-        "├── mechanical/     [EXTRAS] frame CAD, STLs",
-        "├── electrical/     [EXTRAS] wiring, network",
-        "├── UWB_documentation/  [EXTRAS] datasheets",
-        "└── report/         this report and its data",
-    ])
-    R.p("Branches relevant to this report:")
-    R.bullets([
-        "`feature/loc-tags-waypoints`: firmware and mission software flown in the demonstration "
-        "(waypoint-mode trajectory gate, localisation tags, drift correction).",
-        "`feature/loc-tags`: the same with follow-mode (velocity feed-forward) trajectory gate.",
-        "`claude-one-shot`: main development line of the mission (trajectory sweep, frame-pose "
-        "tagging, first UWB integration).",
-        "`uwb-testing`: [EXTRAS] UWB calibration, set-goal and lawnmower tests.",
-        "`camera-fps`: faster OV3660 stream with laptop-only detection (not merged).",
-        "`main`: the original course template.",
-    ])
-
-    R.h1("Appendix B  Key Parameters Used in the Demonstration")
-    R.table("config", "Key mission, firmware and PX4 parameters.",
-            ["Parameter", "Value", "Where"],
-            [["Search area (arena frame)", "x 0.92–4.60 m, y −1.84–1.38 m, margin 0.30 m", "config.yaml `area`"],
-             ["Lane spacing (max)", "1.0 m (Run 1), 3.0 m (Runs 2, 3)", "config.yaml `sweep`"],
-             ["Trajectory sample period / planned speed", "0.20 s / 0.30 m/s", "config.yaml `flight`"],
-             ["Hover check", "0.10 m for 2 s", "config.yaml `flight`"],
-             ["Precision landing", "radius 0.08 m, ≤3 corrections, ≤10 s", "config.yaml `flight`, `localisation`"],
-             ["Geofence margin / stale link / time limit", "0.5 m / 10 s / 600 s", "config.yaml `safety`"],
-             ["Search tag size / localisation tag size", "0.112 m / 0.127 m (black square)", "config.yaml `tags`, `localisation`"],
-             ["Camera mount", "90° pitch (down), 0.08 m forward", "config.yaml `tags`"],
-             ["Detector gate", "margin ≥55, Hamming ≤1, pose error ≤0.5, range ≤1.5 m", "config.yaml `tags`"],
-             ["Confirmation", "5 sightings within 0.20 m; outliers beyond 0.30 m", "config.yaml `tags`"],
-             ["Drift model", "auto (selected hybrid in all runs), similarity", "config.yaml `localisation`"],
-             ["Trajectory gate", "waypoint mode, 15 cm corner radius", "menuconfig"],
-             ["Cruise altitude", "80 cm", "menuconfig `CRUISE_ALT_CM`"],
-             ["Camera stream", "10 fps nominal, JPEG quality 60, QVGA", "menuconfig"],
-             ["Horizontal speed limit", "0.5 / 1.0 [TBC] / 1.5 m/s", "PX4 `MPC_XY_VEL_MAX`"],
-             ["UWB", "not sent to PX4", "config.yaml `uwb.send_to_px4: false`"]],
-            widths_cm=[5.2, 6.4, 4.4])
-
-    R.h1("Appendix C  Event Log of Run 1 (Excerpt)")
-    ev = (ROOT / "data" / "flights" / "full-exploration" / "events.csv").read_text(encoding="utf-8")
-    import csv
-    import io
-    rows = []
-    keep = {"TAKEOFF_CMD", "FLYING_CONFIRMED", "HOVER_CONFIRMED", "HOME_TAG", "ALIGNED",
-            "TRAJ_STARTED", "TAG_CONFIRMED", "TRAJ_END", "LAND_TARGET", "LOC_FIT", "LOC_DRIFT",
-            "LAND_CMD", "MISSION_COMPLETE"}
-    for r in csv.DictReader(io.StringIO(ev)):
-        if r["event"] in keep and r["mission_s"]:
-            rows.append([f"{float(r['mission_s']):.1f}", r["event"], r["details"]])
-    R.table(None, "Selected events of Run 1 (`events.csv`).",
-            ["t (s)", "Event", "Details"], rows, widths_cm=[1.6, 3.6, 10.8], label="Table C1. ")
-
-    R.h1("Appendix D  Reproducing the Results")
-    R.p("From the repository root, with Python 3.10 or newer and numpy, pandas, matplotlib, "
-        "PyYAML and python-docx installed:")
-    R.code([
-        "python report/analyse_flights.py",
-        "python report/build_report.py",
-        "",
-        "cd cde1302",
-        "python -m pytest mission/tests -q",
-        "python mission/mission.py --sim --auto --map",
-    ])
-    R.p("The first command writes the figures and `report/data/metrics.json`; the second writes "
-        "`report/CDE1302_Final_Report_DRAFT.docx`. The test suite gave 432 passed and 1 skipped "
-        "on 12 November 2026.")
-    R.p("Instructions for continuing this report, including the ULog analysis, are in "
-        "`report/AGENT_NOTES.md`.")
-
-
 def main():
     R = Report()
     title_page(R)
-    front_matter(R)
-    sec_intro(R)
-    sec_system(R)
-    sec_software(R)
+    sec_summary(R)
+    sec_architecture(R)
+    sec_navigation(R)
+    sec_detection(R)
+    sec_params(R)
     sec_results(R)
-    sec_ulog(R)
-    sec_extras(R)
+    sec_ai(R)
+    sec_limits(R)
+    sec_note(R)
     sec_conclusion(R)
     sec_refs(R)
-    appendices(R)
     R.save(OUT)
     print(f"wrote {OUT}")
 

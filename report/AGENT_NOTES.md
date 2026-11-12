@@ -34,30 +34,84 @@ the .docx. If the team has already started editing the .docx by hand in Word,
 stop regenerating it: make further changes in Word (or by unzipping and editing
 `word/document.xml`) and say so at the top of this file.
 
-## User requirements (from the person who asked for the report)
+## User requirements (course rules + the person who asked for the report)
 
-- Academic, formal tone. **Times New Roman, no text below 12 pt** (body 12,
-  H3 12, H2 14, H1 16, title 20). Tables and code use 12 pt as well; figure
-  images are exempt. `build_report.py` checks nothing here, so after a change run
-  the size check in "Checking the output" below.
-- Hardware work (frame redesign, electrical) and the **UWB trial** are not part
-  of the mission. Their headings carry the **`[EXTRAS]`** tag (Section 6).
-- UWB was trialled by a teammate (branches `uwb-testing`, `claude-one-shot`)
-  and **not used** in the demonstration: in a small arena the gain was
-  insignificant.
+Course rules (pasted by the user on 12 Nov 2026):
+- **At most 10 pages, including the cover page and any appendix** (source code
+  excluded). The build is currently **9 pages**; the spare page is for the real
+  block diagram and drone photo. Re-check the page count after every change
+  (see "Checking the output").
+- **Single spacing, single column, Times New Roman, at least 12 pt.** Body,
+  tables and captions are 12 pt (H2 14, H1 16, title 20). Inline code is also
+  Times New Roman (no Courier). Figure images are exempt.
+- **GitHub link in the report**: https://github.com/eggsacc/CDE1302-Autonomous-UAV
+  (`REPO_URL`; on the cover and in the conclusion).
+- Submitted on Canvas within 48 h of the demo (demo was 11 Nov 2026, about 11:00).
+- Describe the project **as one integrated system**, not as a list of parts.
+- Cover these points, which are now the section headings:
+  architecture and data/control flow; exploration/search and navigation;
+  AprilTag detection and target localisation; important parameters and
+  implementation decisions; experimental results; **AI-assisted flight-data
+  analysis and visualisation**; limitations, failure cases and improvements.
+
+The user's own rules:
+- Academic, formal tone.
+- **Standalone.** The professor never sees the repository, so apart from the
+  GitHub link the text names no repo paths, file names, branch names, config
+  keys or other documents. Describe what the code does. PX4 parameter names are fine.
+- No `[EXTRAS]` tags. The frame redesign is a paragraph in Section 1, and the
+  UWB trial is one implementation-decision bullet in Section 4. UWB was trialled
+  by a teammate (branches `uwb-testing`, `claude-one-shot`) and **not used** in
+  the demonstration, because in a small arena the gain was insignificant.
+- A section on the odometry-jump finding (now part of Section 6) and a short
+  **Note to the Teaching Team** (Section 8).
 - Image placeholders: the team adds images by hand. Use the shaded
-  `[Image placeholder] <description>` box (`R.image_placeholder`), and don't
-  invent image files. Figures generated from flight data are fine.
-- Ask the user before committing, and before structural changes (new folders,
-  moves).
+  `[Image placeholder] <description>` box, and don't invent image files.
+  Figures generated from flight data are fine.
+- Ask the user before committing, and before structural changes.
 
-## The three demonstration flights
+Current layout: cover (title, drone photo placeholder, team, GitHub link),
+Summary, 1 System Architecture and Data/Control Flow, 2 Exploration and
+Navigation Strategy, 3 AprilTag Detection and Target Localisation, 4 Important
+Parameters and Implementation Decisions, 5 Experimental Results, 6 AI-Assisted
+Flight-Data Analysis and Visualisation (includes the odometry-jump case study
+and the demo-ULog placeholder), 7 Limitations, Failure Cases and Improvements,
+8 Note to the Teaching Team, 9 Conclusion, References. There is no TOC and no
+appendix.
+
+The odometry-jump material comes from the user's own ULog analysis in
+`odom_analysis/` at the repo root (untracked). `figures/fig_odom_divergence.png`
+is its fig 4, with the baked-in "Fig. N —" title strip cropped off
+(`fig_odom_switch.png` is fig 5a, cropped too, currently unused).
+
+IMU facts from the user: `EKF2_MULTI_IMU` = 3 is PX4's default on this board.
+The team changed it during intermediate tests. For the demo they kept the
+default and set the IMU priorities to IMU0 (BMI088) very high and IMU1
+(BMI270) very low, so PX4 falls back to IMU1 only when IMU0 fails. **Unverified:**
+whether sensor priority alone stops the EKF2 *selector* switching instances
+while multi-EKF is on. Check `estimator_selector_status.primary_instance` in
+the demo ULogs.
+
+## The demonstration flights (two are reported)
+
+Three flights were flown. On 12 Nov the user dropped the middle one from the
+report (its speed cap was unconfirmed, and it is "just a slower version" of the
+last flight). Its log copy stays in `data/flights/`, but `RUNS` in
+`analyse_flights.py` leaves it out. **Do not re-add it.**
 
 | Folder | Report name | Sweep | MPC_XY_VEL_MAX |
 |---|---|---|---|
 | `full-exploration` | Run 1 | 4 lanes (`lane_spacing` 1.0) | 0.5 m/s (confirmed by user) |
-| `truncated-exploration-1` | Run 2 | 2 lanes (`lane_spacing` 3) | **1.0 m/s, NOT confirmed**: get it from the .ulg |
-| `truncated-exploration-2` | Run 3 | 2 lanes (`lane_spacing` 3) | 1.5 m/s (confirmed by user) |
+| `truncated-exploration-1` | not reported | 2 lanes | ~1.0 m/s (unconfirmed) |
+| `truncated-exploration-2` | **Run 2** | 2 lanes (`lane_spacing` 3) | 1.5 m/s (confirmed by user) |
+
+**Mission time = take-off command → land command** (`LAND_CMD` in `events.csv`),
+as the user defines it: Run 1 75.6 s, Run 2 36.1 s. This is `mission_time_s` in
+`metrics.json`. It is NOT touchdown, and NOT the logger's `MISSION_COMPLETE`
+(which adds a 6 s settle and gives 81.9 / 42.4 s).
+
+With two runs, repeatability is reported as the distance between the two runs'
+estimates (`max_pairwise_m` in `dispersion`), not as an RMS scatter.
 
 Firmware: branch `feature/loc-tags-waypoints` (`CONFIG_TRAJ_WAYPOINTS=y`, 15 cm
 corners), so the flight speed is PX4's `MPC_XY_VEL_MAX`, not
@@ -66,74 +120,71 @@ corners), so the flight speed is PX4's `MPC_XY_VEL_MAX`, not
 
 ## Open items (search the .docx for `TO BE COMPLETED`, `TO CONFIRM`, `TBC`, `Image placeholder`)
 
-1. **Absolute tag accuracy (Section 4.6).** `truth_tags` in `config.yaml` /
-   `config_used.yaml` belongs to an **earlier test layout. Do not use it.** The
-   `correction.png` files in the run folders show a "TAG ERRORS vs TRUE
-   POSITIONS" table computed from it, which is wrong for the demo layout; that
-   is why the report draws its own figures and doesn't embed `correction.png`.
-   When the user supplies the real positions:
+Every addition must keep the report within 10 pages. Trim elsewhere if needed.
+
+1. **Absolute tag accuracy (Section 5, Localisation paragraph).** `truth_tags`
+   in `config.yaml` / `config_used.yaml` belongs to an **earlier test layout. Do
+   not use it.** The `correction.png` files in the run folders show a "TAG
+   ERRORS vs TRUE POSITIONS" table computed from it, which is wrong for the demo
+   layout. When the user supplies the real positions:
    - run `python mission/tools/relocalise.py ../report/data/flights/<run> --truth "2:x,y 4:x,y 6:x,y"`
-     from `cde1302/` (or add the truth to `analyse_flights.py`), for all 3 runs;
-   - add a table of raw and corrected errors per tag per run to Section 4.6,
-     and update the Abstract, 4.9 and 7;
+     from `cde1302/` (or add the truth to `analyse_flights.py`), for both reported runs;
+   - add raw/corrected error columns to the tag-position table (Table 4) rather
+     than a new table, and update the Summary and Conclusion;
    - ask how many search tags were in the area. The live map says "3/6" only
      because `tags.expected_count` was 6; that is not a verified count.
-2. **Run 2 speed cap**: read `MPC_XY_VEL_MAX` from that flight's .ulg, then
-   update `RUNS` in `analyse_flights.py` and rebuild. The `[TBC]` markers go
-   away by themselves for the cap. Fix the matching text in 4.1, Table 15,
-   Appendix B and the speed figure label.
-3. **Section 5 (black-box / ULog analysis)**: see the next section.
-4. Front matter: group number, names, matriculation numbers, date.
-5. Section 6.2: motors, ESCs, battery, receiver, power budget (`electrical/README.md` TODOs).
-6. Section 6.3: UWB trial numbers (Table 19) from the teammate. There are no
-   UWB logs on `feature/loc-tags-waypoints`; check the `uwb-testing` branch or ask.
-7. Reference [8]: course materials in the module's citation style.
-8. Image placeholders: drone photo, block diagrams (Mermaid sources are in
-   the root `README.md`), state diagram, planner plot, projection diagram,
-   frame simulation, wiring photo, UWB set-up, and three ULog figures.
-9. The 4.9 recommendation (about 1.4 m lanes at about 0.7 m/s) is marked
-   `[TO CONFIRM]` until it is flown.
+2. (Resolved: the flight with the unconfirmed speed cap was dropped from the report.)
+3. **Demo ULog analysis** (TODO box at the end of Section 6): see the next section.
+4. Cover: group number, names, matriculation numbers, date, drone photo.
+5. Table 1, propulsion and battery row (`electrical/README.md` TODOs).
+6. Section 6: `[TO CONFIRM: tool name]` for the AI assistant used. Check with the
+   user how the `odom_analysis` work was done before naming it.
+7. Section 7: the 1.4 m lanes at about 0.7 m/s recommendation is `[TO CONFIRM]`
+   until it is flown.
+8. Architecture block diagram placeholder (Figure 1). The Mermaid sources are in
+   the root `README.md`.
 
-## How to do Section 5 (PX4 ULog)
+## How to do the demo-ULog analysis (PX4 ULog)
 
-The user will download the three demo .ulg files. Expected times: 11 Nov 2026
+The user will download the demo .ulg files (only Run 1 = full-exploration and Run 2 = truncated-exploration-2 are needed). Expected times: 11 Nov 2026
 around 11:13, 11:22 and 11:29 local time (UTC+8). Each mission lasted 42-82 s;
 take-off command to `MISSION_COMPLETE` is in each `events.csv`.
 
 1. Put them in `report/data/ulog/` as `run1.ulg`, `run2.ulg`, `run3.ulg`.
    The ULogs are about 5 MB each; ask before committing them, or gitignore them.
    `cde1302/log_185_UnknownDate.ulg` is from **10 Nov**, before the demo,
-   and is NOT one of them. Section 5.2 mentions it only as context.
+   and is NOT one of them.
 2. Write `report/analyse_ulog.py` with `pyulog` (`pip install pyulog`).
    `ULog(path)`, `ulog.initial_parameters`, `ulog.get_dataset(topic).data`.
    Useful topics, all in PX4 v1.15:
    - parameters: `MPC_XY_VEL_MAX`, `MPC_XY_CRUISE`, `MPC_ACC_HOR`, `MPC_ACC_HOR_MAX`,
      `MPC_XY_P`, `MPC_XY_VEL_P_ACC`, `EKF2_OF_CTRL`, `EKF2_HGT_REF`, `EKF2_EV_CTRL`,
-     `SDLOG_PROFILE` (fills Table 15);
+     `SDLOG_PROFILE`;
    - `vehicle_status.nav_state` (14 = OFFBOARD, 18 = AUTO_LAND) to cut each flight;
    - `trajectory_setpoint` vs `vehicle_local_position` (x, y, vx, vy): tracking and
-     the norm-limited velocity argument (Eq. 3) for Section 5.4;
+     the norm-limited velocity argument (Eq. 3);
    - `vehicle_attitude` (quaternion) vs `vehicle_attitude_setpoint`, and
-     `vehicle_angular_velocity` vs `vehicle_rates_setpoint` (5.5);
+     `vehicle_angular_velocity` vs `vehicle_rates_setpoint`;
    - `actuator_motors`, `control_allocator_status` (saturation);
    - `estimator_status`, `estimator_innovations`, `estimator_optical_flow_vel`,
      `distance_sensor`, `estimator_states.covariances` (yaw variance), and
-     `vehicle_local_position.xy_reset_counter` (5.6);
-   - `battery_status` (voltage, current), `sensor_combined` / `vehicle_imu_status` (5.7).
+     `vehicle_local_position.xy_reset_counter`, `estimator_selector_status`;
+   - `battery_status` (voltage, current), `sensor_combined` / `vehicle_imu_status`.
    With `SDLOG_PROFILE` 161, estimator topics may be logged at only 2-5 Hz.
    Say so in the report if that's the case.
 3. Align time: PX4 `timestamp` is boot time in µs. Match the OFFBOARD start to
    the `TAKEOFF_CMD` / `TRAJ_STARTED` mission times in `events.csv`, or
    cross-correlate PX4 x, y against `trajectory.csv`.
-4. Save figures as `figures/fig_ulog_*.png`. In `build_report.py`, replace the
-   `R.image_placeholder("ulog_track" | "ulog_att" | "ulog_ekf", ...)` calls with
-   `R.figure(...)` (same keys keep the numbering) and replace each `R.todo(...)`
-   in `sec_ulog` with the analysis text. Fill Tables 15 and 16 from the results.
-5. Questions the section has to answer (Table 16): was Run 2 at 1.0 m/s; is
+4. The results go in Section 6 (`sec_ai`): replace its final `R.todo(...)` with
+   a short paragraph, and update Table 3 and Section 7 where they are affected.
+   **The 10-page limit leaves room for at most one small figure**
+   (`figures/fig_ulog_*.png`, key added to `FIGS` in order of appearance).
+5. Questions to answer: is
    the outward lane bias caused by PX4's norm-limited velocity demand (lanes
    start with momentum from the transit leg); did tilt or motors near limits at
    1.5 m/s; did flow quality drop with speed; does yaw-variance growth explain
-   the fitted frame rotation (−2.4° to −3.8°).
+   the fitted frame rotation (−2.4° to −3.8°); did any estimator instance
+   switch or position reset happen, i.e. did the IMU-priority change work (see Section 6 and `odom_analysis/`).
 
 ## Facts established while writing the draft (don't re-derive)
 

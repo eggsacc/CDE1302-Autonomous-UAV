@@ -35,14 +35,14 @@ FIG = ROOT / "figures"
 FIG.mkdir(exist_ok=True)
 
 # Run order, display names and the PX4 horizontal speed cap (MPC_XY_VEL_MAX).
-# The 1.0 m/s value for truncated-exploration-1 is NOT yet confirmed: check it
-# against the parameters in that flight's .ulg and update here + metrics.
+# Only two of the three demonstration flights are reported. The user dropped
+# truncated-exploration-1 (unconfirmed cap, "just a slower version" of the last
+# flight); its log copy stays in data/flights/ but is not analysed.
+# truncated-exploration-2 is called "Run 2" in the report.
 RUNS = [
     {"id": "full-exploration", "name": "Run 1: full sweep", "short": "Run 1",
      "cap": 0.5, "cap_confirmed": True},
-    {"id": "truncated-exploration-1", "name": "Run 2: truncated sweep", "short": "Run 2",
-     "cap": 1.0, "cap_confirmed": False},
-    {"id": "truncated-exploration-2", "name": "Run 3: truncated sweep", "short": "Run 3",
+    {"id": "truncated-exploration-2", "name": "Run 2: truncated sweep", "short": "Run 2",
      "cap": 1.5, "cap_confirmed": True},
 ]
 
@@ -225,6 +225,9 @@ def analyse(run: dict) -> dict:
     t_sweep_end = float(ev_first(ev, "TRAJ_END", "sweep").mission_s)
     t_home = float(ev_first(ev, "TRAJ_END", "return home").mission_s)
     t_hover_confirmed = float(ev_first(ev, "HOVER_CONFIRMED").mission_s)
+    # Mission time as the team defines it: take-off command -> land command
+    # (not touchdown, and not the logger's MISSION_COMPLETE, which adds 6 s).
+    t_land_cmd = float(ev_first(ev, "LAND_CMD").mission_s)
 
     passes = {}
     for _, r in ev_rows(ev, "WAYPOINT_PASSED").iterrows():
@@ -312,6 +315,7 @@ def analyse(run: dict) -> dict:
             "t_sweep_start_s": t_sweep_start, "t_sweep_end_s": t_sweep_end,
             "t_return_s": t_return, "t_home_s": t_home,
             "t_landing_s": t_landing, "t_done_s": t_done,
+            "t_land_cmd_s": t_land_cmd, "mission_time_s": t_land_cmd,
             "sweep_duration_s": t_sweep_end - t_sweep_start,
             "return_duration_s": t_home - t_return,
             "settle_duration_s": t_landing - t_home,
@@ -478,7 +482,7 @@ def fig_sightings(results):
     w = 0.26
     for k, r in enumerate(results):
         n = {t["tag_id"]: t["n_sightings"] for t in r["metrics"]["tags"]}
-        xs = np.arange(len(tag_ids)) + (k - 1) * w
+        xs = np.arange(len(tag_ids)) + (k - (len(results) - 1) / 2) * w
         bars = ax.bar(xs, [n[i] for i in tag_ids], width=w - 0.03, color=SERIES[k],
                       label=f"{r['run']['name']} (cap {r['metrics']['mpc_xy_vel_max']:.1f} m/s)")
         for b in bars:
@@ -594,7 +598,7 @@ def main():
               f"xt rms {m['xt_rms_all_m']*100:.1f} cm max {m['xt_max_all_m']*100:.1f} cm, "
               f"overshoot {m['overshoot_max_m']*100:.1f} cm, all tags at "
               f"{m['all_tags_after_sweep_start_s']:.1f} s after sweep start, total "
-              f"{m['t_done_s']:.1f} s")
+              f"{m['mission_time_s']:.1f} s (take-off cmd -> land cmd)")
     print(json.dumps(metrics["dispersion"], indent=1))
 
 
