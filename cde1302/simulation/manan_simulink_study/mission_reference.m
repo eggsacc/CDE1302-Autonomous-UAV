@@ -1,7 +1,12 @@
 function varargout = mission_reference(varargin)
 %MISSION_REFERENCE Discrete position mission and a pure unit-test interface.
-% ref=[p3;zeros6;fixedYaw;0]; diagnostic=[stage;goal;done;failed;gate;entry;stable].
+% ref=[p3;zeros6;yaw;0]; diagnostic=[stage;goal;done;failed;gate;entry;stable].
 % stage:1takeoff 2hover 3sweep 4return 5settle 6descent 7endpoint 8done 9failed.
+% The position input p is whatever the navigation system believes: simulated
+% truth in the ideal Phase 1 baseline, the estimate in Phase 2 runs.
+% Yaw: 'fixed' commands cfg.mission.yawRad; 'tangent' slews (at most
+% maxYawRateRadps) to the planned leg heading. turnPauseMode='matched' holds
+% the position command for the same planned turn time in both yaw modes.
 if nargin>0 && (ischar(varargin{1}) || isstring(varargin{1}))
     switch char(varargin{1})
         case 'initial', varargout{1}=initialState(varargin{2});
@@ -33,7 +38,7 @@ end
 
 function postSetup(block)
 block.NumDworks=1; block.Dwork(1).Name='missionState';
-block.Dwork(1).Dimensions=12; block.Dwork(1).DatatypeID=0;
+block.Dwork(1).Dimensions=16; block.Dwork(1).DatatypeID=0;
 block.Dwork(1).Complexity='Real'; block.Dwork(1).UsedAsDiscState=true;
 end
 
@@ -55,16 +60,22 @@ end
 
 function state=initialState(cfg)
 validateattributes(cfg.mission.routeNed,{'double'},{'2d','ncols',3,'nonempty','finite'});
-% [stage,goal,done,failed,entry,stable,lastUpdate,descentZ,pendingCorner]
+% 1 stage, 2 goal, 3 done, 4 failed, 5 stage entry time, 6 stable since,
+% 7 last update time, 8 descent start altitude, 9 pending corner handoff,
+% 10:12 commanded position, 13 commanded yaw (unwrapped), 14 pause until,
+% 15 target leg heading (unwrapped), 16 leg whose turn has been scheduled.
 assert(ismember(cfg.mission.guidanceMode,{'bounded_position','waypoints'}), ...
     'MananStudy:GuidanceMode','Unknown guidance mode.');
+y0=cfg.mission.yawRad;
 state=[1;1;0;0;0;nan;-inf;cfg.frames.homeNed(3)-cfg.mission.heightM;0; ...
-    cfg.frames.homeNed(:)];
+    cfg.frames.homeNed(:);y0;-inf;y0;0];
 end
 
 function [ref,diag,next]=stepMission(t,p,state,cfg)
 p=double(p(:)); next=state(:); m=cfg.mission; h=cfg.frames.homeNed(:);
 cruise=[h(1:2);h(3)-m.heightM];
+yawMode=optionalField(m,'yawMode','fixed');
+pauseMode=optionalField(m,'turnPauseMode','none');
 validP=numel(p)==3 && all(isfinite(p));
 advance=~isfinite(t) || t>next(7)+1e-10;
 if advance && next(1)~=8 && next(1)~=9
@@ -131,6 +142,16 @@ elseif next(1)==6
 elseif next(1)==7 || next(1)==8
     goal=h;
 end
+% A new horizontal leg schedules its turn once: leg k flies to corner k,
+% leg N+1 returns home. The plan is fixed geometry, identical in both modes.
+legKey=0;
+if next(1)==3, legKey=next(2); elseif next(1)==4, legKey=size(m.routeNed,1)+1; end
+if advance && isfinite(t) && legKey>0 && legKey~=state(16) && isfield(m,'turnPlan')
+    next(16)=legKey;
+    next(15)=m.turnPlan.headingUnwrapped(legKey);
+    if strcmp(pauseMode,'matched'), next(14)=t+m.turnPlan.pauseS(legKey); end
+end
+paused=isfinite(t) && t<next(14)-1e-10;
 command=goal;
 if strcmp(m.guidanceMode,'bounded_position')
     command=state(10:12);
@@ -139,6 +160,7 @@ if strcmp(m.guidanceMode,'bounded_position')
         if isfinite(state(7)), dt=max(0,t-state(7)); end
         delta=goal(1:2)-command(1:2); distance=norm(delta);
         maxStep=m.maxReferenceSpeedMps*dt;
+        if paused, maxStep=0; end
         if distance>0
             command(1:2)=command(1:2)+delta*min(1,maxStep/distance);
         end
@@ -147,11 +169,25 @@ if strcmp(m.guidanceMode,'bounded_position')
     end
 end
 next(10:12)=command;
-ref=[command;zeros(6,1);m.yawRad;0];
+yawCommand=m.yawRad;
+if strcmp(yawMode,'tangent')
+    yawCommand=state(13);
+    if advance && isfinite(t)
+        dt=0;
+        if isfinite(state(7)), dt=max(0,t-state(7)); end
+        yawStep=m.maxYawRateRadps*dt;
+        yawCommand=yawCommand+max(-yawStep,min(yawStep,next(15)-yawCommand));
+    end
+end
+next(13)=yawCommand;
+ref=[command;zeros(6,1);yawCommand;0];
 gateError=nan; if validP, gateError=norm(p(1:2)-goal(1:2)); end
 diag=[next(1:4);gateError;next(5:6)];
 end
 
+function value=optionalField(s,name,default)
+if isfield(s,name), value=char(s.(name)); else, value=default; end
+end
 function state=enterStage(state,stage,t)
 state(1)=stage; state(5)=t; state(6)=nan;
 end

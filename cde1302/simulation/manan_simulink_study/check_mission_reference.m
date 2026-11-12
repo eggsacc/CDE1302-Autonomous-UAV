@@ -66,7 +66,53 @@ R=[0 -1;1 0];
 recovered=R.'*(rotated.mission.routeNed(:,1:2).'-[2;-3])+rotated.frames.homeArena;
 assert(max(abs(recovered.'-rotated.mission.routeArena),[],'all')<1e-12);
 checked{end+1}='production route transform with 90-degree rotation and displaced origin';
+% ---- Phase 3 yaw modes (logic only) ----
+fixedCfg=study_config('demo',[],struct('heightM',0.8,'laneSpacingM',1.0, ...
+    'maxReferenceSpeedMps',0.3,'turnPauseMode','matched','yawMode','fixed'));
+tangentCfg=study_config('demo',[],struct('heightM',0.8,'laneSpacingM',1.0, ...
+    'maxReferenceSpeedMps',0.3,'turnPauseMode','matched','yawMode','tangent'));
+plan=tangentCfg.mission.turnPlan;
+assert(all(abs(plan.deltaRad)<=pi+1e-12));
+% Leg 1 is the diagonal from home, leg 2 runs along lane 1, leg 3 is the first
+% lane-end cross-over, which must be a 90-degree turn either way.
+assert(abs(abs(plan.deltaRad(3))-pi/2)<1e-12);
+checked{end+1}='turn plan uses shortest turns (|turn| <= 180 deg; lane ends are 90 deg)';
+[cmdF,yawF,stF]=idealRun(fixedCfg); [cmdT,yawT,stT]=idealRun(tangentCfg);
+assert(isequal(size(cmdF),size(cmdT)) && max(abs(cmdF-cmdT),[],'all')<1e-12);
+assert(isequal(stF,stT));
+checked{end+1}='matched pauses give identical position commands and stages in both yaw modes';
+assert(all(yawF==fixedCfg.mission.yawRad));
+checked{end+1}='fixed mode keeps the commanded yaw constant';
+dt=tangentCfg.mission.tickS;
+assert(max(abs(diff(yawT)))<=tangentCfg.mission.maxYawRateRadps*dt+1e-12);
+checked{end+1}='tangent yaw command never exceeds the yaw-rate limit per tick';
+% While the command moves along leg k, tangent yaw equals that leg's heading.
+moving=[false; vecnorm(diff(cmdT(:,1:2)),2,2)>1e-9];
+legHeading=nan(size(yawT));
+legHeading(stT(:,1)==3)=plan.headingUnwrapped(stT(stT(:,1)==3,2));
+legHeading(stT(:,1)==4)=plan.headingUnwrapped(end);
+check=moving & isfinite(legHeading);
+assert(any(check) && max(abs(yawT(check)-legHeading(check)))<1e-9);
+checked{end+1}='tangent: the nose is on the leg heading whenever the command moves';
+plain=study_config('demo',[],struct('yawMode','tangent','turnPauseMode','none'));
+assert(plain.mission.turnPlan.totalPauseS==0 && ...
+    contains(plain.mission.turnPlan.strictTangentConflict,'unbounded'));
+checked{end+1}='strict-tangent corner conflict is reported, no pause without matched mode';
 report=struct('passed',true,'count',numel(checked),'checks',{checked}, ...
     'scope','Mission logic only; not Simulink plant performance');
 fprintf('Mission reference checks: %d passed (logic only).\n',report.count);
+end
+
+function [command,yaw,stage]=idealRun(cfg)
+% Declared ideal follower: position equals the command. Logic test only.
+s=mission_reference('initial',cfg); p=cfg.frames.homeNed;
+n=floor(cfg.mission.maxTimeS/cfg.mission.tickS)+1;
+command=nan(n,3); yaw=nan(n,1); stage=nan(n,2); k=0;
+for t=0:cfg.mission.tickS:cfg.mission.maxTimeS
+    [r,d,s]=mission_reference('step',t,p,s,cfg); k=k+1;
+    command(k,:)=r(1:3).'; yaw(k)=r(10); stage(k,:)=d(1:2).'; p=r(1:3);
+    if d(3) || d(4), break; end
+end
+assert(d(3)==1 && d(4)==0,'Ideal follower did not complete the mission.');
+command=command(1:k,:); yaw=yaw(1:k); stage=stage(1:k,:);
 end

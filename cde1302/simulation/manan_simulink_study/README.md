@@ -5,7 +5,11 @@
 > bounded-reference governor mission have all run through the vehicle model in
 > MATLAB R2026a. Current checkpoint and numbers: [PROGRESS.md](PROGRESS.md).
 > History of the Codex session: [CLAUDE_HANDOFF.md](CLAUDE_HANDOFF.md).
-> Branch: `manan`. Phase 2 has not started.
+> Branch: `manan`. Phase 2 (landmarks, methods A/B/C, GUI) is complete:
+> design, assumptions and first single-seed results are in
+> [RESULTS_PHASE2.md](RESULTS_PHASE2.md). Phase 3 (fixed vs tangent yaw) is
+> complete: 14 paired simulations and the recommendation (keep fixed yaw)
+> are in [RESULTS_PHASE3.md](RESULTS_PHASE3.md).
 
 Phase 1 builds a fixed-yaw, position-command testbench around Dr Feng LIN's
 original quadrotor model. It separates command, simulated truth and ideal
@@ -193,10 +197,62 @@ their firmware. Existing landmark correction is post-flight, not EKF feedback.
 Manan's contribution is experiment definition, adaptation, reproducible
 measurements, validation and interpretation. Codex assisted with audit and the
 initial study-code implementation; Claude Code continued with governor
-execution, post-processing, replay and documentation. This README does not
-claim independent authorship of lecturer, teammate or AI-generated code.
+execution, post-processing, replay, the Phase 2/3 estimator, Method B port,
+GUI and documentation. Method B is a MATLAB port of the team's
+`localisation.py` (feature/loc-tags). This README does not claim independent
+authorship of lecturer, teammate or AI-generated code.
 
-Phase 2 (targets, anchors, estimator and GUI), Phase 3 (paired yaw experiments)
-and optional UWB have not been implemented. Phase 1 is awaiting Manan's review.
 Manan pushed the study to branch `manan`; the AI assistants do not commit or
-push without his explicit approval.
+push without Manan's explicit approval. UWB (former Phase 4) was dropped by
+Manan on 11 November 2026.
+
+## Phase 2/3: landmarks, localisation methods and yaw
+
+Scope agreed with Manan: three random unknown target tags, any number of
+known floor landmarks placed in a GUI, fixed or tangent yaw. Status of every
+piece is in `PROGRESS.md`; the estimator-in-the-loop Simulink runs are done by
+Manan in the desktop.
+
+```matlab
+uav_study_gui                    % the interactive app (desktop only)
+res = run_nav_scenario(struct('anchors','home_corners5','method','C','yawMode','tangent'));
+T = run_nav_experiments();       % paired grid; then, in the desktop:
+plot_nav_experiments();
+```
+
+How the estimate reaches the controller (`build_study_model`, model
+`MananStudy_Nav`): a 50 Hz block (`nav_estimator` -> `nav_core`) simulates the
+sensors from truth and runs the estimator on the simulated measurements only.
+It outputs the estimate's error, which is added to the true position, velocity
+and heading before they reach the lecturer controller and the mission logic.
+The controller therefore flies on the estimate (error-state injection, a
+stand-in for IMU-aided fusion that tracks fast motion and drifts slowly).
+Roll, pitch and body rates stay ideal; height is ideal (rangefinder).
+
+| Method | What it is | Changes the flight? |
+|---|---|---|
+| A | Optical-flow dead reckoning + gyro heading, no landmark use | baseline |
+| B | Team's post-flight drift correction (port of `localisation.py`) applied to the A flight's landmark sightings | no, report only |
+| C | Study 3-state EKF `[pN pE psi]` using delayed landmark sightings online, chi-square gated, with a reset after 5 rejections | yes |
+
+Sensor numbers, with sources, are in `scenario_config.m`. Team values: camera
+intrinsics fx 163.5 / fy 153.2 px at 320x240, straight down, 0.08 m forward;
+10 fps; 0.13 s latency; 0.03 m sighting noise; 30 deg/s yaw-rate frame gate;
+1.5 m range; 0.112 m targets and 0.127 m landmarks; ids 22-29 (29 = home).
+Assumed (not measured): flow scale 3 %, flow bias 1 mm/s, gyro bias
+0.01 deg/s, gyro scale 0.5 %, 2 deg placement heading error, 90 % per-frame
+detection, 2 % outliers. Same seed => same targets and sensor errors in every
+paired comparison. Wall tags are not modelled: a downward camera cannot see them.
+
+Yaw: tangent mode points the nose along each planned leg at no more than
+0.6 rad/s (Manan's `yaw_test_lab5` uploader default). Strict tangent yaw needs
+an unbounded yaw rate at every corner; the study reports that conflict and,
+in BOTH yaw modes, stops the position command for the same planned turn time,
+so fixed and tangent runs receive identical position commands. No
+yaw-dependent error is injected: any yaw difference comes from the plant,
+the team's 30 deg/s frame gate, camera geometry and the assumed gyro/flow
+error models.
+
+Logic tests (no Simulink): `check_mission_reference` (18), `check_nav_core`
+(10), `check_postcorrect` (4). Batch MATLAB on this machine cannot create
+figures, so plots are made in the desktop.

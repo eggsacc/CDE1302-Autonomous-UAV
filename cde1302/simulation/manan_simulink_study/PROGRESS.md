@@ -1,124 +1,132 @@
-# Phase 1 checkpoint — governor executed, awaiting Manan's Phase 2 approval
+# Checkpoint — Phases 1, 2 and 3 complete (12 Nov 2026)
 
-Updated 11 November 2026 (Singapore time) by Claude, continuing from Codex's
-`CLAUDE_HANDOFF.md`. Manan's original brief remains the authoritative spec.
+Phase 3 done: Manan ran `run_phase3_yaw` (14 runs, 38.5 min, all completed).
+`RESULTS_PHASE3.md` has the results and the final recommendation: keep fixed
+yaw (tangent improved nothing; worse dead-reckoned target error in 3/3
+pairs; 6.5 % frames gated; sensitive to flow-sensor offset). Two of the
+report's pre-run predictions (written by Claude) were wrong and are reported
+as such (gate loss 6.5 % not 15-17 %; nose lags turns by ~33 deg). A completion-scoring bug (100 Hz
+grid missing the DONE tick) was fixed in `nav_metrics`/`run_nav_scenario`.
+Optional, not run: the multi-seed landmark-layout grid `run_nav_experiments`.
+UWB dropped. Commit of Phase 2/3 files awaits Manan's approval.
+
+Phase 2 write-up: `RESULTS_PHASE2.md`. Manan runs all Simulink simulations;
+Claude does not. GUI runs are exported to the workspace as `guiRuns`.
+`run_phase2_checks` passed 15/15 on Manan's desktop (11 Nov 2026, 9.2 min):
+touchdown landing ideal 0.002 m, A 0.127 m, C 0.007 m. GUI live view and
+guiRuns export confirmed. Next: the multi-seed grid (`run_nav_experiments`).
+
+Updated 11 November 2026 (Singapore time) by Claude. Manan's original brief
+remains the authoritative spec. Phase 1 results are below, unchanged.
 
 ## Status in one line
 
-The approved bounded position-reference governor has now **executed through the
-lecturer's quadrotor Simulink model** and completed the full mission. Phase 1
-deliverables exist; Phase 2 (targets, anchors, estimator, GUI) is **not started**
-and needs Manan's approval.
+Phase 1 is complete and committed (`922f574`). Phase 2 and 3 were merged by
+Manan into one milestone: three random target tags, any number of known floor
+landmarks placed in a GUI, fixed or tangent yaw, Methods A/B/C. UWB is
+dropped. All Phase 2/3 code is written and its logic tests pass. **No
+estimator-in-the-loop Simulink run has completed yet.** Manan asked to run the
+simulations in the desktop and report findings; Claude does not launch them.
 
 ## Git state
 
-- Working branch: **`manan`**. Manan committed the study himself as `9d62e69`
-  ("commit", 04:36) and pushed it to `origin/manan`. The branch was cut from
-  `feature/manan-simulink-apriltag-yaw-study` at `e7a231e`, which is still the
-  pinned `claude-one-shot` base.
-- The study exists only on `manan`. On other branches the folder shows only the
-  ignored `results/` and `generated/` (~280 MB), which then appear untracked.
-  Never `git add .` on another branch while those folders are present.
-- These documentation updates were made after `9d62e69` and are uncommitted.
-  Claude does not commit or push without Manan's explicit approval.
+- Branch **`manan`**, pushed. Study commits: `9d62e69` (study files,
+  committed by Manan) and `922f574` (Phase 1 docs, approved).
+- Phase 2/3 files below are **uncommitted**. Ask Manan before committing.
+- On other branches the folder shows only ignored `results/` and `generated/`
+  (~280 MB). Never `git add .` on another branch while they are present.
 
-## Executed / not executed
+## Phase 2/3 status
 
-| Item | Status | Evidence |
+| Piece | Status | Evidence |
 |---|---|---|
-| Lecturer circle reproduction (R2026a) | Executed (by Codex, desktop) | `evidence/original_circle.json`, `results/original_circle/` |
-| Raw position-step mission (`waypoints` mode) | Executed; negative diagnostic | `evidence/fixed_yaw_demo.json`, `results/fixed_yaw_demo/` |
-| **Bounded governor mission (`bounded_position`)** | **Executed, completed, stage DONE** | `evidence/fixed_yaw_demo_bounded_position.json`, `results/fixed_yaw_demo_bounded_position/` |
-| Lecturer asset hashes (5 files) | Passed before the governor run | console log |
-| Mission logic checks (12) | Passed before the governor run | `evidence/mission_logic_checks.json` |
-| Native 20 Hz command-slew check | Passed on the governor run (max 0.150 m/s both axes) | one-off check from `raw_simulation.mat`, numbers below |
-| Replay of the governor run (`animate_run`) | Viewed by Manan in the desktop | — |
-| `team_head_placeholder` preset through the plant | **Not executed** | — |
-| Official arena geometry | **Unresolved**; demo geometry is assumed | `study_config.m` |
-| PX4 logs `log_185`, `log_sample.zip` | **Not available** in workspace | — |
-| Ground contact / landing physics | **Not modelled** (by design) | floor penetration visible in results |
+| Yaw modes + matched turn pauses (`mission_reference`, `study_config`) | Done | 18/18 `check_mission_reference` (12 original Phase 1 checks still pass) |
+| Scenario config, seeded targets/sensor errors (`scenario_config`, `anchor_layout`) | Done | covered by `check_nav_core` pairing test |
+| Sensor + estimator core (`nav_core`) | Done | 10/10 `check_nav_core` |
+| Simulink wiring (`build_study_model` nav mode, `nav_estimator`) | Compiles | model update passed; full run interrupted at Manan's request |
+| Method B port (`nav_postcorrect`) | Done | 4/4 `check_postcorrect` |
+| Run/metrics (`run_nav_scenario`, `nav_metrics`, `nav_tag_report`) | Written | needs a Simulink run |
+| GUI (`uav_study_gui`) | Written | Code Analyzer clean; never opened yet |
+| Experiments (`run_nav_experiments`, `plot_nav_experiments`, `plot_nav_comparison`) | Written | needs Simulink runs |
+| Results and yaw recommendation | Not started | depends on Manan's runs |
 
-## Governor run — actual numbers
+Logic-test highlights (synthetic truth, not flight evidence):
+- Ideal sensors: estimate equals truth exactly while translating and turning.
+- Camera footprint at 0.8 m: 1.566 m across x 1.253 m along, 0.08 m ahead.
+- 0.05 m/s flow bias, 20 s hover over a landmark: A drifts 1.00 m, C 0.036 m.
+- A 0.5 m outlier is rejected; a 0.30 m step error converges without overshoot.
+- 3 deg placement heading error falls to 0.06 deg over the home tag in 5 s.
+- Method B recovers a 3 deg / 11 cm frame offset exactly; with time-growing
+  creep, auto mode picks the time model (target error 0.154 m -> 0.000 m).
 
-Simulated 04:05:51, post-processed 04:28:55 (Singapore), MATLAB R2026a Update 5,
-fixed-step ode4 at 1 ms, 256 251 samples, 256.25 s. Stage times: takeoff 0 s,
-hover 3.25 s, sweep 8.05 s, return 204.9 s, settle 240.15 s, descend 244.9 s,
-endpoint hold 249.9 s, done 256.25 s. All 14 sweep corners commanded in order.
+Turn plan, team flight (0.8 m, 1.0 m lanes, 0.30 m/s): 11 leg junctions
+(-14, +14, eight x 90, -140.6 deg); 31.4 s of matched pauses; planned ~159 s.
+Strict tangent yaw would need unbounded yaw rate at each junction.
 
-| Metric | Raw step run | Governor run |
-|---|---:|---:|
-| Max horizontal speed | 8.817 m/s | 0.181 m/s |
-| Mean sweep speed | 0.896 m/s | 0.153 m/s |
-| Max height (0.5 m commanded) | 1.914 m | 0.561 m |
-| Max tilt | 108.9° | 3.02° |
-| Max yaw error | 179.87° | 0.023° |
-| RMS setpoint error XY | 0.916 m | 0.041 m |
-| Max setpoint error XY | 5.411 m | 0.142 m |
-| RMS distance to active leg | 0.284 m | 0.025 m |
-| Closest approach, long-lane corners | — | ≤ 0.0001 m |
-| Closest approach, short cross-lane corners | — | 0.030 m |
-| Return error before descent | 0.036 m | 0.036 m |
-| Final horizontal endpoint error | 0.0007 m | 0.0008 m |
-| Min centre margin to outer boundary | 0.070 m | 0.398 m |
-| Max ground-plane penetration | 0.043 m | 0.040 m |
+## First Simulink results (Manan's desktop runs, 11 Nov 2026)
 
-All integrity, reference, boundary and mission checks pass. The single false
-check is `noGroundPlanePenetration`, which is the expected free-flight model
-limitation, not a controller fault. There is still no tracking pass threshold;
-these are measurements, not a pass/fail verdict.
+Seed 1, team flight, 5 landmarks (`home_corners5`), fixed yaw. 71-124 s wall
+clock per 156 s mission; every mission completed.
 
-Physical reading: with the command walked at 0.15 m/s, the lecturer's RPT loop
-trails its moving setpoint by about 4 cm on straight lanes, cuts the short
-cross-lane corners by about 3 cm, and overshoots takeoff to 0.56 m before
-settling. These follow from ideal feedback and the NUSWARM parameters; they are
-not evidence about the team's MicoAir aircraft or PX4.
+| | Ideal sensors | A | B (post-flight, from A) | C (online) |
+|---|---:|---:|---:|---:|
+| Estimate error RMS / max (airborne) | 0.002 / 0.004 m | 0.109 / 0.232 m | track 0.015 m | 0.062 / 0.179 m |
+| Heading error RMS | 0.00 deg | 1.72 deg | - | 0.65 deg |
+| Target mean error (3/3 confirmed) | 0.002 m | 0.042 m | 0.006 m | 0.026 m |
+| True distance to planned route RMS (sweep) | 0.054 m | 0.119 m | same flight as A | 0.090 m |
+| Max tilt | 3.2 deg | 4.2 deg | same flight as A | 11.4 deg |
+| Landmark frames in view / used | 43 / 39 % | 48 / 44 % | - | 44 / 39 % (9 rejected) |
 
-## How it was run (and the batch-mode caveat)
+Method B chose `hybrid` (leave-one-out 3.0 cm vs global 6.9, time 6.3).
+C's tilt spike comes from estimate jumps at landmark corrections.
 
-- `run_baseline('demo')` ran to completion in **ordinary PowerShell batch mode**
-  (`matlab -batch`), unlike Codex's sandbox. Simulation, raw save, metrics and
-  CSV all completed.
-- The **PNG export hangs in batch mode** (figure creation with 256k-point lines
-  never returns; CPU idles). The batch process was stopped after about 20 min.
-  Manan then ran `postprocess_baseline('demo')` in the MATLAB desktop, which
-  rebuilt everything from the saved `raw_simulation.mat` in about a minute.
-  Desktop is the verified route for plots; batch is fine for simulation.
-- Benign warnings seen: unconnected spare outputs of the study's status demux,
-  a `Demux4` warning that belongs to the lecturer's model, and "Diagnostic
-  Viewer is not ready" (batch mode has no viewer).
+**Artefact found and fixed:** landing errors of 0.31 / 1.04 / 0.30 m were
+measured after touchdown. Below 8 cm flow was switched off and the no-floor
+lecturer model let the drone slide ~0.3 m with no horizontal feedback.
+Fix: flow cut-off lowered to 2 cm (`flowMinHeightM`), landing now scored at
+touchdown (true height <= 2 cm) with the later slide reported separately.
+The table above predates the fix for landing only; other rows are unaffected.
+Re-score existing runs with `res.metrics = nav_metrics(res)`; the cut-off
+change needs new runs.
 
-## Files added or changed by Claude
+## What Manan runs next (desktop MATLAB, in this folder)
 
-| File | Change |
-|---|---|
-| `postprocess_baseline.m` | New. Builds result/metrics/plots/run.mat/evidence from `raw_simulation.mat` or directly from `sim()` output. Records simulation and post-processing timestamps separately. Keeps native 20 Hz reference samples. |
-| `run_baseline.m` | Now calls `postprocess_baseline` after saving raw output; no behaviour change to the simulation itself. |
-| `animate_run.m` | New. Replays a saved run (top-down + 3D, airframe cross, command marker, stage label). Replay of logged data, not a live simulation. |
-| `analyse_run.m` | Cosmetic: tiled-layout titles exported dark, stage tick labels literal. Metrics unchanged. |
-| `README.md`, `PROGRESS.md`, `CLAUDE_HANDOFF.md` | Status brought up to date; handoff body kept as history. |
+1. `out = run_phase2_checks();` (~6 min): logic tests, perfect-sensor wiring
+   check, realistic A(+B) and C. Paste the VERDICTS and SUMMARY blocks.
+   Saves `results/phase2_checks/runs.mat` and `comparison.png`.
+2. `uav_study_gui`: one run, confirm the live map moves, then
+   `print_nav_summary(guiRuns)` and paste.
+3. Only if 1 is all PASS: `T = run_nav_experiments();` (30 runs, ~1 h),
+   then `summarise_nav_experiments(T)` (paste) and `plot_nav_experiments()`
+   (sends landmarks.png and yaw.png to results/nav_experiments/).
 
-The current PNGs were exported before the cosmetic fix; rerun
-`postprocess_baseline('demo')` in the desktop to refresh them.
+Report: verdict/summary blocks, any red error text word for word (not the
+"not connected"/"Demux4" warnings), and the PNGs.
 
-## Team context noted for Phase 2
+## Known caveats
 
-`feature/loc-tags` gained two teammate commits on 11 Nov (`5f799ae`, `690637e`):
-in-flight drift correction for the tag report in `cde1302/mission/localisation.py`
-and a camera bench tool `cde1302/mission/tools/cam_bench.py`. They do not touch
-this study. Review them before designing Methods B and C in Phase 2.
+- The first smoke run was slow (still simulating after ~10 min wall time).
+  Two speed fixes were added afterwards and are untested: the mission block
+  gets a small `studyMissionConfig`, and the estimator caches its config.
+- Batch MATLAB on this machine hangs on any figure creation. Stalled batch
+  processes from 04:19 (PIDs 24508, 48584) may still exist; stopping them was
+  blocked by the permission classifier. Close them in Task Manager if wanted.
+- All Phase 2/3 numbers will rest on assumed sensor errors (`scenario_config`),
+  the lecturer RPT controller (not PX4) and a study EKF (not EKF2).
+
+## Phase 1 results (unchanged)
+
+Governor run, 256.25 s, all 14 corners, stage DONE. Max horizontal speed
+0.181 m/s, max height 0.561 m (0.5 m commanded), max tilt 3.02 deg, RMS
+setpoint error 0.041 m, return error 0.036 m, ground penetration 0.040 m
+(no contact model). Raw position-step run for contrast: 8.82 m/s, 1.914 m,
+108.9 deg tilt. Evidence: `evidence/fixed_yaw_demo_bounded_position.json`.
 
 ## Geometry and data still missing
 
-Unchanged from the handoff: no official arena drawing, no `log_185_UnknownDate.ulg`,
-no `log_sample.zip`, no flown `config_used.yaml`. Demo geometry (outer 5.4 × 4.5 m,
-search x 1.2..4.8 / y 0.45..4.05, start square 0.15..1.05, home (0.6, 0.6), 0.6 m
-lanes) is an **assumption** labelled on every figure.
+No official arena drawing, no `log_185_UnknownDate.ulg`, no `log_sample.zip`,
+no flown `config_used.yaml`. Demo geometry is an assumption on every figure.
 
-## Next step
-
-Phase 1 review by Manan. If approved, Phase 2: three random target tags, known
-anchors with camera field-of-view visibility, a simple documented estimator with
-methods A/B/C, and the arena GUI. Ask separately before any commit or push.
-
-Standing rules: keep every change inside this directory; preserve lecturer assets
-byte-for-byte; never claim PX4 equivalence, validated touchdown or official geometry.
+Standing rules: keep every change inside this directory; preserve lecturer
+assets byte-for-byte; never claim PX4 equivalence, validated touchdown,
+official geometry, or flight validation of simulated sensor effects.
