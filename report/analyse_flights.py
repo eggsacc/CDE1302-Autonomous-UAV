@@ -12,7 +12,7 @@ Run from the repo root:
 Everything here is computed from the laptop-side mission logs, i.e. from PX4's
 own position estimate as relayed over Wi-Fi at ~10 Hz.  It is NOT ground truth:
 the only external reference is the set of localisation tags at surveyed spots.
-The PX4 .ulg black-box analysis is a separate script (analyse_ulog.py, TODO).
+The PX4 .ulg black-box analysis is a separate script (analyse_ulog.py).
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ FIG.mkdir(exist_ok=True)
 # truncated-exploration-2 is called "Run 2" in the report.
 RUNS = [
     {"id": "full-exploration", "name": "Run 1: full sweep", "short": "Run 1",
-     "cap": 0.5, "cap_confirmed": True},
+     "cap": 0.4, "cap_confirmed": True},  # MPC_XY_VEL_MAX from the ULog (sess217)
     {"id": "truncated-exploration-2", "name": "Run 2: truncated sweep", "short": "Run 2",
      "cap": 1.5, "cap_confirmed": True},
 ]

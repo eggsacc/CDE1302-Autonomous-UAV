@@ -3,4 +3,4 @@ pandas
 matplotlib
 PyYAML
 python-docx
-pyulog        # Section 5 (ULog analysis), not needed yet
+pyulog        # analyse_ulog.py (Section 5)
