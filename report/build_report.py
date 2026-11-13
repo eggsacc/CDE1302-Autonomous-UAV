@@ -582,9 +582,16 @@ def sec_detection(R: Report):
         "five sightings agree within 0.2 m. An isolated false decode cannot gather five "
         "neighbours, so it is never confirmed.")
     R.p(
-        "**Drift correction.** Optical-flow odometry drifts in scale, heading and position. "
-        "Five localisation tags (IDs 22–25 and 29) were placed at surveyed floor-grid positions. "
-        "Each visit to one pairs its PX4 position with its surveyed position. After the flight, "
+        "**Drift correction.** Optical-flow odometry drifts in scale, heading and position. We "
+        "correct it with ground control points: localisation tags at surveyed floor positions. "
+        "The search tags come from a truncated tag16h5 family that contains only IDs 0–21. We "
+        "restored the remaining eight codes in the detector and reserved IDs 22–29 for ground "
+        "control points, so that one can never be mistaken for a search target. The layout is "
+        "not fixed: a graphical tool places any number of these tags on any node of the 0.46 m "
+        "floor-tile grid and writes their positions into the mission configuration. If a "
+        "randomly placed search tag falls on a planned ground control point, the layout can "
+        "therefore be changed on the day. The demonstration used five (IDs 22–25, and 29 as the "
+        "home tag). Each visit to one pairs its PX4 position with its surveyed position. After the flight, "
         "a 2-D similarity transform is fitted to all visits by least squares [3]:")
     R.equation("p_arena = s · R(θ) · p_PX4 + t", 5)
     R.p(
@@ -610,7 +617,7 @@ def sec_params(R: Report):
              ["Hover check", "10 cm for 2 s", "Stable before the sweep"],
              ["Precision landing", "8 cm, ≤ 3 moves, ≤ 10 s", "Land on the start box"],
              ["Geofence / link time-out", "0.5 m / 10 s", "Automatic landing"],
-             ["IMU priority", "BMI088 highest, BMI270 lowest", "Avoid estimator switches (§6)"]],
+             ["IMU priority", "BMI088 highest, BMI270 lowest", "Avoid estimator switches (§8)"]],
             widths_cm=[5.0, 5.0, 6.0])
     R.p("The main implementation decisions were:")
     R.bullets([
@@ -726,33 +733,10 @@ def sec_ai(R: Report):
         "against what was seen in flight. This checking mattered: the first speed estimate "
         "showed 0.62 m/s under a 0.5 m/s limit, an artefact of differentiating jittery Wi-Fi "
         "timestamps that smoothing removed. Similarly, an automatic accuracy plot was found to "
-        "use reference tag positions from an earlier layout, so it was left out.")
-    R.p(
-        "**Case study: sudden odometry jumps.** In several trial flights the reported position "
-        "jumped by metres, and the drone lunged or yawed violently. The ULogs of two such "
-        "flights (A and B) showed this was not a sensor fault. The flight controller has two "
-        "IMUs, a BMI088 and a BMI270. With PX4's default setting (`EKF2_MULTI_IMU` = 3) it runs "
-        "one EKF2 instance per IMU and publishes whichever it rates healthier. With no compass, "
-        "nothing measures yaw, so each instance integrates its own gyroscope. In flight the "
-        "BMI270 read about 2°/s less yaw rate than the BMI088 (−2.5°/s in A, −1.8°/s in B), "
-        "while both read near zero at rest. This suggests a vibration-related error. Because "
-        "optical flow is rotated into the world frame using each instance's own heading, the two "
-        f"estimates diverged by 105° and 5.4 m in A, and by over 200° and 6.9 m in B "
-        f"({F('odom_div')}). Each stayed self-consistent, so PX4's health checks saw nothing "
-        "wrong.")
-    R.figure("odom_div", FIG / "fig_odom_divergence.png",
-             "Heading (top) and position (bottom) divergence between the two estimator instances "
-             "in trial flights A and B, until PX4 switched between them.", width_cm=11.5)
-    R.p(
-        "A 60 ms innovation spike on the healthy instance (descent onset in A, touchdown in B) "
-        "made PX4 switch to the drifted one. It then published the whole difference as an "
-        "instant reset: 5.3 m and −106° in A. A was airborne and its setpoints were still in "
-        "the old frame, so the drone yawed at up to 94°/s until an automatic landing and the "
-        "kill switch ended the flight. For the demonstration we gave the BMI088 the highest "
-        "sensor priority and the BMI270 the lowest, so that PX4 falls back to the BMI270 only if "
-        "the BMI088 fails. No jump occurred in any demonstration flight. The blame on "
-        "the BMI270 rests on both IMUs sharing one rigid board and has not been checked against "
-        "an external heading reference.")
+        "use reference tag positions from an earlier layout, so it was left out. The same "
+        "approach, applied to PX4's onboard logs, diagnosed the sudden odometry jumps seen in "
+        "trial flights. Because they stem from the course's baseline flight-controller "
+        "configuration, that case study is given in Section 8.")
     R.todo("Analysis of the demonstration ULogs: the cause of the lane bias, tilt and motor "
            "margins at 1.5 m/s, and confirmation that no estimator switch occurred.")
 
@@ -772,7 +756,7 @@ def sec_limits(R: Report):
         "**Systematic flow scale error** of 2.2 %. Fix: calibrate the flow sensor's scale.",
         "**Precision-landing hold.** The 8 cm radius is close to the hover wobble, so the drone "
         "corrected until the 10 s limit in both runs. A 10 cm radius would save about 5 s.",
-        "**Estimator switching (failure case, Section 6).** The robust fix is a single "
+        "**Estimator switching (failure case, Section 8).** The robust fix is a single "
         "estimator instance on the BMI088 (`EKF2_MULTI_IMU` = 0) plus a heading reference, and "
         "companion software that re-anchors its setpoints when PX4 reports a position reset.",
         "**No ground truth.** All positions are PX4 estimates corrected by the localisation "
@@ -785,14 +769,48 @@ def sec_note(R: Report):
     R.h1("8  Note to the Teaching Team")
     R.p(
         "We saw severe odometry drift and sudden position and velocity snaps many times in "
-        "trials. For a long time we blamed tuning or our own code. Section 6 shows that at "
-        "least two came from the flight controller's default configuration. With two IMUs, no "
-        "compass and PX4's default `EKF2_MULTI_IMU` = 3, PX4 can silently switch to an estimate "
-        "whose heading has drifted by 100° or more. Nothing in QGroundControl or the telemetry "
-        "warns of this. Other groups on the same board are probably exposed and may mistake it "
-        "for a control bug. We suggest that the course baseline either run a single estimator "
-        "on the BMI088 or set the IMU priorities as we did, and that the companion template "
-        "handle PX4's position-reset counter.")
+        "trials, and for a long time blamed tuning or our own code. The log analysis of "
+        "Section 6 showed that at least two came from the flight controller's default "
+        "configuration. Other groups on the same board are probably exposed and may mistake it "
+        "for a control bug, so we report it here.")
+    R.p(
+        "**Case study: sudden odometry jumps.** In several trial flights the reported position "
+        "jumped by metres, and the drone lunged or yawed violently. The ULogs of two such "
+        "flights (A and B) showed this was not a sensor fault. The flight controller has two "
+        "IMUs, but only one is made for this application. The BMI088 is designed for drones and "
+        "robotics, with high robustness to vibration [7]. The BMI270 is a low-power IMU "
+        "intended for wearables [8], and is much more susceptible to vibration and drift. With "
+        "PX4's default setting (`EKF2_MULTI_IMU` = 3), PX4 runs one EKF2 instance per IMU and "
+        "publishes whichever it rates healthier, and both IMUs have the same default (medium) "
+        "priority. In flight the BMI270 read about 2°/s less yaw rate than the BMI088 (−2.5°/s "
+        "in A, −1.8°/s in B), while both read near zero at rest, which points to a "
+        "vibration-related error. With no compass, nothing measures heading, so each instance "
+        "integrates its own gyroscope and its accumulated yaw drift has nothing to be compared "
+        "against. Because optical flow is rotated into the world frame using each instance's "
+        f"own heading, the two estimates diverged by 105° and 5.4 m in A, and by over 200° and "
+        f"6.9 m in B ({F('odom_div')}). Each stayed self-consistent, so neither was flagged as "
+        "erroneous and PX4's health checks saw nothing wrong.")
+    R.figure("odom_div", FIG / "fig_odom_divergence.png",
+             "Heading (top) and position (bottom) divergence between the two estimator instances "
+             "in trial flights A and B, until PX4 switched between them.", width_cm=11.5)
+    R.p(
+        "A 60 ms innovation spike on the healthy instance (descent onset in A, touchdown in B) "
+        "made PX4 switch to the drifted one. It then published the whole difference as an "
+        "instant reset: 5.3 m and −106° in A. A was airborne and its setpoints were still in "
+        "the old frame, so the drone yawed at up to 94°/s until an automatic landing and the "
+        "kill switch ended the flight. Nothing in QGroundControl or the telemetry warned of "
+        "this. The selector's health metrics cannot see heading drift, so it can hand control "
+        "to the instance that has drifted most, and the switch itself is the dangerous update. "
+        "This is why, on a board with no compass, PX4 should neither switch estimators "
+        "automatically nor keep both IMUs at the same priority. For the demonstration we gave "
+        "the BMI088 the highest priority and the BMI270 the lowest, so that PX4 falls back to "
+        "the BMI270 only if the BMI088 fails, and no jump occurred in any demonstration flight. "
+        "Attributing the error to the BMI270 rests on its intended use and on both IMUs sharing "
+        "one rigid board; it has not been checked against an external heading reference.")
+    R.p(
+        "We suggest that the course baseline either run a single estimator on the BMI088 "
+        "(`EKF2_MULTI_IMU` = 0) or set the IMU priorities as we did, and that the companion "
+        "template handle PX4's position-reset counter.")
 
 
 def sec_conclusion(R: Report):
@@ -820,6 +838,9 @@ def sec_refs(R: Report):
         "PX4 Autopilot, *PX4 User Guide (v1.15)*. https://docs.px4.io/v1.15/",
         "MAVLink, *MAVLink Developer Guide*. https://mavlink.io/",
         "Nooploop, *LinkTrack P-A Series User Manual*.",
+        "Bosch Sensortec, *BMI088 Data Sheet: 6-Axis Motion Tracking for High-Performance "
+        "Applications*.",
+        "Bosch Sensortec, *BMI270 Data Sheet*.",
     ]
     for i, ref in enumerate(refs, 1):
         para = R.doc.add_paragraph()

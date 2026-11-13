@@ -3,6 +3,14 @@
 These notes are for an agent or teammate picking up the CDE1302 final report.
 Read them before editing anything in `report/`.
 
+> **13 Nov 2026: the .docx is now edited by hand.** The team edited it in Word,
+> and the `improvements.txt` changes were applied directly to the .docx. **Do not
+> run `build_report.py` again**: its text is stale and would overwrite these edits.
+> Edit the .docx in Word, or with python-docx on a copy, and re-check the page count.
+> Run 2 is now framed as an exploratory speed test (tag positions already known
+> from Run 1). Use it only to show shortcomings at speed, not in the limitations
+> or the localisation analysis.
+
 ## What this is
 
 `CDE1302_Final_Report_DRAFT.docx` is the draft final report on the mission
@@ -63,21 +71,25 @@ The user's own rules:
   UWB trial is one implementation-decision bullet in Section 4. UWB was trialled
   by a teammate (branches `uwb-testing`, `claude-one-shot`) and **not used** in
   the demonstration, because in a small arena the gain was insignificant.
-- A section on the odometry-jump finding (now part of Section 6) and a short
+- A section on the odometry-jump finding (moved on 13 Nov 2026 into Section 8) and a short
   **Note to the Teaching Team** (Section 8).
 - Image placeholders: the team adds images by hand. Use the shaded
   `[Image placeholder] <description>` box, and don't invent image files.
   Figures generated from flight data are fine.
 - Ask the user before committing, and before structural changes.
 
-Current layout: cover (title, drone photo placeholder, team, GitHub link),
-Summary, 1 System Architecture and Data/Control Flow, 2 Exploration and
-Navigation Strategy, 3 AprilTag Detection and Target Localisation, 4 Important
-Parameters and Implementation Decisions, 5 Experimental Results, 6 AI-Assisted
-Flight-Data Analysis and Visualisation (includes the odometry-jump case study
-and the demo-ULog placeholder), 7 Limitations, Failure Cases and Improvements,
-8 Note to the Teaching Team, 9 Conclusion, References. There is no TOC and no
-appendix.
+Current layout (9 pages, about 2/3 of page 9 free): cover (title, drone photo
+placeholder, team, GitHub link), Summary, 1 System Architecture and Data/Control
+Flow, 2 Exploration and Navigation Strategy (the sweep is generated from the area
+corners + margin, not hard-coded; "Heading compensation, return and landing"),
+3 AprilTag Detection and Target Localisation (detector gate thresholds and the UWB
+trial are inline here; Figure 2 = GCP configurator), 4 Experimental Results
+(Table 2 both runs; Figure 3 Run 1 path, Figure 4 Run 2 path; Table 3 Run 1 tag
+positions raw/corrected/shift), 5 AI-Assisted Flight-Data Analysis, 6 Limitations
+(Run 1 evidence only), 7 Note to the Teaching Team (short: IMU heading drift, no
+heading reference, effect of a switch, recommended fix; Figure 5), 8 Conclusion,
+References. The old Section 4 (parameter table + decisions) was removed on 13 Nov
+at the user's request. There is no TOC and no appendix.
 
 The odometry-jump material comes from the user's own ULog analysis in
 `odom_analysis/` at the repo root (untracked). `figures/fig_odom_divergence.png`
@@ -87,7 +99,18 @@ is its fig 4, with the baked-in "Fig. N —" title strip cropped off
 IMU facts from the user: `EKF2_MULTI_IMU` = 3 is PX4's default on this board.
 The team changed it during intermediate tests. For the demo they kept the
 default and set the IMU priorities to IMU0 (BMI088) very high and IMU1
-(BMI270) very low, so PX4 falls back to IMU1 only when IMU0 fails. **Unverified:**
+(BMI270) very low, so PX4 falls back to IMU1 only when IMU0 fails. The user's
+argument for this (13 Nov, now in §8): the BMI088 is the application-specific
+(drone/robotics, vibration-robust) IMU, while the BMI270 is a wearables part, more
+prone to vibration and drift. With no compass, accumulated yaw drift has nothing to
+be compared against in either instance, so it is never flagged, which makes
+auto-switching / equal (default MEDIUM) priorities unsafe. Refs [7] and [8] are the Bosch datasheets.
+
+Ground control points (= localisation tags, §3): the course's search dictionary is
+a truncated tag16h5 (IDs 0-21); IDs 22-29 were restored and reserved for GCPs.
+`mission/tools/loc_layout.py` places any number of them on any 0.46 m grid node,
+so the layout can move if a search tag lands on a planned GCP. The demo used
+22-25 + 29 (home). **Unverified:**
 whether sensor priority alone stops the EKF2 *selector* switching instances
 while multi-EKF is on. Check `estimator_selector_status.primary_instance` in
 the demo ULogs.
