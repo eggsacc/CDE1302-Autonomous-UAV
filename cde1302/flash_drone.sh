@@ -195,6 +195,32 @@ grep -Fxq "CONFIG_WIFI_NETMASK_IPV4_ADDR=\"$WIFI_NETMASK\"" "$SDKCONFIG" || die 
 [ "$(grep -c '^CONFIG_WIFI_NETMASK_IPV4_ADDR=' "$SDKCONFIG")"     -eq 1 ] || die "duplicate CONFIG_WIFI_NETMASK_IPV4_ADDR lines"
 echo "drone $DRONE_ID  ->  QGC $HOST_IP, ESP32 static IP $DRONE_IP"
 
+# ------------------------------------------------- 3b. Local overrides (optional)
+# An untracked sdkconfig.local holds bench-only settings (e.g. UWB on one
+# drone) without committing sdkconfig. Lines "CONFIG_X=value" or
+# "# CONFIG_X is not set" replace that key; anything else is ignored.
+LOCAL="$PROJECT_DIR/sdkconfig.local"
+LOCAL_LINES=""
+if [ -f "$LOCAL" ]; then
+    step "Applying sdkconfig.local"
+    LOCAL_LINES="$(grep -E '^(CONFIG_[A-Z0-9_]+=.*|# CONFIG_[A-Z0-9_]+ is not set)$' "$LOCAL" \
+                   | tr -d '\r' || true)"
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        key="$(printf '%s\n' "$line" | sed -E 's/^# (CONFIG_[A-Z0-9_]+) is not set$/\1/; s/^(CONFIG_[A-Z0-9_]+)=.*/\1/')"
+        case "$key" in
+            CONFIG_DRONE_ID|CONFIG_HOST_IPV4_ADDR|CONFIG_DRONE_STATIC_IPV4_ADDR|CONFIG_WIFI_GATEWAY_IPV4_ADDR|CONFIG_WIFI_NETMASK_IPV4_ADDR)
+                die "sdkconfig.local may not set $key (this script sets it from the drone id)";;
+        esac
+        TMP="$(mktemp "${TMPDIR:-/tmp}/sdkconfig.local.XXXXXX")"
+        awk -v k="$key" 'index($0, k "=") != 1 && $0 != "# " k " is not set"' "$SDKCONFIG" > "$TMP"
+        printf '%s\n' "$line" >> "$TMP"
+        cat "$TMP" > "$SDKCONFIG"
+        rm -f "$TMP"
+        echo "  $line"
+    done <<< "$LOCAL_LINES"
+fi
+
 # ---------------------------------------------------------------- 4. Build
 step "Building drone $DRONE_ID"
 idf.py build
@@ -213,6 +239,24 @@ grep -Fxq "#define CONFIG_WIFI_GATEWAY_IPV4_ADDR \"$WIFI_GATEWAY\"" "$HDR" \
 grep -Fxq "#define CONFIG_WIFI_NETMASK_IPV4_ADDR \"$WIFI_NETMASK\"" "$HDR" \
     || die "built binary has the wrong WiFi netmask -- not flashing"
 echo "verified: firmware is drone $DRONE_ID, QGC $HOST_IP, ESP32 $DRONE_IP"
+
+# Every sdkconfig.local setting must have survived kconfgen (a value out of
+# range, or an option whose dependency is off, is silently dropped).
+while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    case "$line" in
+        "# CONFIG_"*" is not set")
+            key="${line#\# }"; key="${key% is not set}"
+            ! grep -q "^#define $key " "$HDR" \
+                || die "sdkconfig.local: $key should be off but is set in the build -- not flashing";;
+        *)
+            key="${line%%=*}"; val="${line#*=}"
+            [ "$val" = "y" ] && val=1
+            grep -Fxq "#define $key $val" "$HDR" \
+                || die "sdkconfig.local: $line did not make it into the build ($(grep -m1 "define $key " "$HDR" || echo 'not defined')) -- not flashing";;
+    esac
+done <<< "$LOCAL_LINES"
+[ -z "$LOCAL_LINES" ] || echo "verified: sdkconfig.local settings are in the build"
 
 # ---------------------------------------------------------------- 5. Flash
 step "Flashing drone $DRONE_ID"

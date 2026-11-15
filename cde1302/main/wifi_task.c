@@ -4,6 +4,7 @@
 #include "at_detect.h"
 #include "odom.h"
 #include "tof_task.h"
+#include "uwb_task.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -164,6 +165,7 @@ static void handle_command(const wifi_cmd_pkt_t *cmd)
         }
         s_phase = MISSION_BUSY;   /* one START per flight */
         s_start_requested = true;
+        uwb_clear_alignment();    /* never fly on a previous flight's alignment */
         ESP_LOGI(TAG, "CMD_START");
         break;
     case CMD_GOTO:
@@ -409,6 +411,8 @@ void wifi_task(void *arg)
                     handle_nav_tags(cmd_buf, len);
                 } else if (cmd_buf[1] == CMD_SET_PEERS) {
                     handle_peers(cmd_buf, len);
+                } else if (cmd_buf[1] == CMD_UWB_ALIGN) {
+                    uwb_handle_align_cmd(cmd_buf, len);
                 } else if (len >= (int)sizeof(wifi_cmd_pkt_t)) {
                     handle_command((const wifi_cmd_pkt_t *)cmd_buf);
                 }

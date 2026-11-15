@@ -121,6 +121,22 @@ void mavlink_send_land_command(void);
 // Thread-safe snapshot — safe to call from any task.
 drone_state_t mavlink_get_state(void);
 
+// Drone pose at esp_timer time t_us (e.g. a camera frame's capture time),
+// interpolated from recent LOCAL_POSITION_NED samples on the same clock.
+// heading: rad in [-pi, pi), 0 = North, clockwise positive; yaw_rate: rad/s;
+// gap_ms: distance to the nearest sample used.  False if t_us is not covered.
+bool mavlink_pose_at(int64_t t_us, float *x, float *y, float *heading,
+                     float *yaw_rate, int32_t *gap_ms);
+
 // Convenience: true if we have received position data recently (< 500ms)
 bool mavlink_position_valid(void);
+
+// ---------------------------------------------------------------------------
+// External position (CONFIG_UWB_SEND_TO_PX4)
+// ---------------------------------------------------------------------------
+
+// Newest aligned UWB fix: x/y in PX4 local NED metres with their variance
+// (m^2), measured at t_us (esp_timer).  mavlink_task sends the latest one in
+// its 20 Hz loop.  PX4 uses the variance with EKF2_EV_NOISE_MD = 0.
+void mavlink_set_vision_position(float x, float y, float var_xy, uint64_t t_us);
 

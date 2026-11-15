@@ -1,4 +1,5 @@
 #include "mavlink_task.h"
+#include "pose_hist.h"
 
 // MAVLink — header-only, common dialect covers everything PX4 needs.
 // Do NOT define MAVLINK_USE_CONVENIENCE_FUNCTIONS — that path requires a
@@ -121,6 +122,10 @@ static uint32_t      s_sp_update_ms;   // timestamp of last setpoint update
 
 static SemaphoreHandle_t s_sp_mutex;
 static SemaphoreHandle_t s_state_mutex;
+/* PX4 positions on the esp_timer clock, for pairing camera frames (pose_hist.h).
+ * Guarded by s_state_mutex.  Zero-initialised = empty. */
+static pose_hist_t s_pose_hist;
+#define MAV_POSE_MAX_EXTRAP_US 100000
 
 static void clamp_vec2_to_speed(float *vx, float *vy, float max_speed)
 {
@@ -456,6 +461,10 @@ static void send_speed_limit(void)
     ESP_LOGI(TAG, "Speed limit set: %.2f m/s", MAV_CMD_SPEED_CAP_MS);
 }
 
+#if CONFIG_UWB_SEND_TO_PX4
+static void reply_timesync(const mavlink_message_t *in);
+#endif
+
 // ---------------------------------------------------------------------------
 // Incoming message parser
 // Drains whatever is in the UART RX buffer and updates s_state.
@@ -503,6 +512,11 @@ static void parse_incoming(void)
                 s_state.vx = pos.vx;  s_state.vy = pos.vy;  s_state.vz = pos.vz;
                 s_state.enu_z     = -pos.z;   // NED z-down → ENU z-up
                 s_state.last_pos_ms = now_ms;
+                if (s_state.last_att_ms != 0) {
+                    pose_sample_t ps = { .t_us = esp_timer_get_time(), .x = pos.x,
+                                         .y = pos.y, .heading = s_state.heading };
+                    pose_hist_push(&s_pose_hist, &ps);
+                }
                 xSemaphoreGive(s_state_mutex);
                 break;
             }
@@ -541,6 +555,12 @@ static void parse_incoming(void)
                 break;
             }
 
+#if CONFIG_UWB_SEND_TO_PX4
+            case MAVLINK_MSG_ID_TIMESYNC:
+                reply_timesync(&msg);
+                break;
+#endif
+
             default:
                 break;
             }
@@ -549,6 +569,79 @@ static void parse_incoming(void)
         available -= (size_t)n;
     }
 }
+
+// ---------------------------------------------------------------------------
+// External position: position-only ODOMETRY, plus TIMESYNC replies
+//
+// LOCAL_FRD with no orientation is what lets PX4 use this with no compass.
+// VISION_POSITION_ESTIMATE is always NED, which EKF2 refuses until its heading
+// is aligned, and that takes a compass, GNSS or vision yaw.  In FRD with a NaN
+// quaternion EKF2 fuses x/y as they are, so they must already be in its frame.
+// ---------------------------------------------------------------------------
+#if CONFIG_UWB_SEND_TO_PX4
+#define VISION_MAX_AGE_US  100000   // never send a fix older than this
+
+static struct {
+    float    x, y, var_xy;
+    uint64_t t_us;
+    bool     fresh;
+} s_vision;     // guarded by s_state_mutex
+
+static void send_vision(void)
+{
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    bool fresh = s_vision.fresh;
+    s_vision.fresh = false;
+    float x = s_vision.x;
+    float y = s_vision.y;
+    float var_xy = s_vision.var_xy;
+    uint64_t t_us = s_vision.t_us;
+    float z = s_state.z;    // EKF2 needs a finite z; EKF2_EV_CTRL = 1 ignores it
+    xSemaphoreGive(s_state_mutex);
+
+    if (!fresh || (uint64_t)esp_timer_get_time() - t_us > VISION_MAX_AGE_US) return;
+
+    float q[4], pose_cov[21], vel_cov[21];
+    for (int i = 0; i < 4; i++)  q[i] = NAN;
+    for (int i = 0; i < 21; i++) pose_cov[i] = vel_cov[i] = NAN;
+    // Upper triangle, row by row: [0] = xx, [6] = yy, [11] = zz.  PX4 needs all
+    // three finite to use them; z is never fused (EKF2_EV_CTRL = 1).
+    pose_cov[0] = pose_cov[6] = var_xy;
+    pose_cov[11] = 100.0f;
+
+    // ODOMETRY only exists in MAVLink 2.
+    mavlink_get_channel_status(MAVLINK_COMM_0)->flags &= ~MAVLINK_STATUS_FLAG_OUT_MAVLINK1;
+
+    mavlink_message_t msg;
+    mavlink_msg_odometry_pack(
+        OBC_SYSID, OBC_COMPID, &msg, t_us,
+        MAV_FRAME_LOCAL_FRD, MAV_FRAME_BODY_FRD,
+        x, y, z, q,
+        NAN, NAN, NAN,          // velocity: not measured
+        NAN, NAN, NAN,          // body rates: not measured
+        pose_cov, vel_cov,
+        0,                      // reset_counter: the frame never jumps
+        MAV_ESTIMATOR_TYPE_VISION,
+        100                     // quality; EKF2_EV_QMIN is 0
+    );
+    send_message(&msg);
+}
+
+// PX4 asks with tc1 = 0; the answer lets it convert t_us to its own clock.
+// Without one it uses the arrival time, so this is an improvement, not a need.
+static void reply_timesync(const mavlink_message_t *in)
+{
+    mavlink_timesync_t req;
+    mavlink_msg_timesync_decode(in, &req);
+    if (req.tc1 != 0) return;
+
+    mavlink_message_t msg;
+    mavlink_msg_timesync_pack(OBC_SYSID, OBC_COMPID, &msg,
+                              esp_timer_get_time() * 1000, req.ts1,
+                              in->sysid, in->compid);
+    send_message(&msg);
+}
+#endif /* CONFIG_UWB_SEND_TO_PX4 */
 
 // ---------------------------------------------------------------------------
 // Public API implementations
@@ -660,12 +753,48 @@ void mavlink_send_land_command(void)
     send_land();
 }
 
+bool mavlink_pose_at(int64_t t_us, float *x, float *y, float *heading,
+                     float *yaw_rate, int32_t *gap_ms)
+{
+    pose_sample_t p;
+    float rate = 0.0f;
+    int64_t gap = 0;
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    bool ok = pose_hist_at(&s_pose_hist, t_us, MAV_POSE_MAX_EXTRAP_US, &p, &rate, &gap);
+    xSemaphoreGive(s_state_mutex);
+    if (!ok) return false;
+    *x = p.x;
+    *y = p.y;
+    *heading = p.heading;
+    *yaw_rate = rate;
+    *gap_ms = (int32_t)(gap / 1000);
+    return true;
+}
+
 drone_state_t mavlink_get_state(void)
 {
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     drone_state_t copy = s_state;
     xSemaphoreGive(s_state_mutex);
     return copy;
+}
+
+void mavlink_set_vision_position(float x, float y, float var_xy, uint64_t t_us)
+{
+#if CONFIG_UWB_SEND_TO_PX4
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    s_vision.x = x;
+    s_vision.y = y;
+    s_vision.var_xy = var_xy;
+    s_vision.t_us = t_us;
+    s_vision.fresh = true;
+    xSemaphoreGive(s_state_mutex);
+#else
+    (void)x;
+    (void)y;
+    (void)var_xy;
+    (void)t_us;
+#endif
 }
 
 bool mavlink_position_valid(void)
@@ -751,6 +880,10 @@ void mavlink_task(void *arg)
 
         // 20 Hz: setpoint (MUST NOT be skipped — PX4 watchdog is 500ms)
         send_setpoint();
+
+#if CONFIG_UWB_SEND_TO_PX4
+        send_vision();
+#endif
 
         // Drain RX buffer, update s_state, and forward PX4 MAVLink to QGC
         parse_incoming();

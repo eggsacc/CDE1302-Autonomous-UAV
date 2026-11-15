@@ -9,6 +9,12 @@ idf_component_register(
         "camera_stream.c"
         "wifi_task.c"
         "odom.c"
+        "nlink_parser.c"
+        "uwb_debug_pack.c"
+        "uwb_px4.c"
+        "traj_gate.c"
+        "pose_hist.c"
+        "uwb_task.c"
     INCLUDE_DIRS "."
     REQUIRES
         mavlink
