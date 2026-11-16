@@ -348,3 +348,5 @@ For a fair comparison, change only `uwb.send_to_px4` between flights.
 ## More documents
 
 - [BENCH_TEST_SETUP.md](BENCH_TEST_SETUP.md): bench test without flying
+- [UWB_ESP32_BENCH_TEST.md](UWB_ESP32_BENCH_TEST.md): testing the UWB module and wiring
+- [UWB_PX4_FLIGHT_TEST.md](UWB_PX4_FLIGHT_TEST.md): UWB to PX4 in detail

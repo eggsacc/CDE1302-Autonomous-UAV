@@ -43,6 +43,7 @@ code/
 │   ├── live_map.py        Live 2-D map window (`--map`)
 │   ├── sim.py, synth_camera.py   Simulator: fake drone + rendered camera frames
 │   ├── uwb_*.py, nlink.py UWB alignment and decoding (not used in the final mission)
+│   ├── UWB_*.md           UWB bench and flight test procedures
 │   ├── tools/             relocalise.py (redo the correction from a log), loc_layout.py (place loc tags),
 │   │                      cam_bench.py (camera calibration), compare_flights.py, UWB bench tools
 │   ├── tests/             pytest suite; test_*_c.py compile the C firmware modules and test them on the laptop

@@ -30,7 +30,7 @@ by localisation tags) and the route it flew.
 
 Present but not used in the final mission: UWB (`main/uwb_*`,
 `main/nlink_parser.*`, `mission/uwb_*.py`, `mission/nlink.py`;
-`uwb.send_to_px4` stays `false`); the ToF ring and VFH avoidance
+`uwb.send_to_px4` stays `false`; test procedures in `mission/UWB_*.md`); the ToF ring and VFH avoidance
 (`TOF_ENABLED 0`); the course swarm scripts in `laptop/` (`run_*.py`,
 `exploration.py`, `relay.py`, …). Don't remove them without asking.
 
@@ -125,5 +125,3 @@ switch.
   the real value is in `sdkconfig` (192.168.1.102).
 - `laptop/` docs (`TEST_GUIDE.md`) use example drone 22 and `python3`; on
   this machine use drone 2 and `python`.
-- Some firmware comments (`main/Kconfig.projbuild`, `main/uwb_task.h`) and a
-  `config.yaml` comment still point to the removed UWB test docs.
