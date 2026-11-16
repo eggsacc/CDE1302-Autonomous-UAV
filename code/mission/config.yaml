@@ -21,7 +21,7 @@ area:
   margin: 0.3           # keep waypoints this far inside the edges (m)
 
 sweep:
-  lane_spacing: 3      # max distance between lanes (m); measure camera swath in the lab
+  lane_spacing: 1.0      # max distance between lanes (m); measure camera swath in the lab
   lanes_along: x         # "x" = lanes run North-South, "y" = lanes run East-West
   camera_offset_m: 0.0   # trajectory mode: drone -> middle of the camera's view on the floor (m).
                          # The heading never changes, so the whole sweep is shifted this far
