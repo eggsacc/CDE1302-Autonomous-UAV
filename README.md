@@ -11,12 +11,11 @@ The drone is **pseudo-autonomous**. A laptop plans the sweep and runs the tag
 detection over Wi-Fi, and the drone flies the uploaded path by itself. An
 operator starts the mission and keeps the RC kill switch in hand.
 
-> **[Image placeholder]** Drone photo / final run map (`map.png`)
+![alt text](assets/cde1302-grp2-team.jpg)
 
 ## How it works
 
-> **[Image placeholder]** System overview: laptop, ESP32-S3 and PX4, and what
-> flows between them
+![alt text](assets/system_overview.png)
 
 | Device | Role |
 |---|---|
@@ -41,9 +40,7 @@ tag positions and route.
 
 ## Control architecture
 
-> **[Image placeholder]** Cascaded control loop: laptop (mission, 10 Hz) →
-> ESP32 (path following, 20 Hz setpoints) → PX4 (position → velocity →
-> attitude → motors), with EKF2 feeding position back
+![alt text](assets/control_architecture.png)
 
 | Layer | Rate | Does |
 |---|---|---|
@@ -57,7 +54,6 @@ tag positions and route.
 |---|---|
 | [Software](code/) | ESP32 firmware, course laptop tools and the search mission. [`code/README.md`](code/README.md) maps every folder; [`code/mission/README.md`](code/mission/README.md) explains how to fly |
 | [Mechanical](frame/) | Redesigned 3D-printed frame: stiffer arms, no print supports, faster assembly. CAD + STLs |
-| [Electrical](electrical/) | Onboard hardware, wiring and network |
 
 ## Repository layout
 
@@ -68,6 +64,5 @@ tag positions and route.
 │   ├── laptop/           Course-provided laptop tools (comms, camera viewer, detector)
 │   ├── trajectory/       MATLAB trajectory generators (course labs)
 │   └── waypoints/        Waypoint test files (course labs)
-├── frame/                Frame redesign: STEP, STLs, design notes
-└── electrical/           Hardware architecture and wiring
+└── frame/                Frame redesign: STEP, STLs, design notes
 ```
