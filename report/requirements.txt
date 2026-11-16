@@ -1,6 +1,0 @@
-numpy
-pandas
-matplotlib
-PyYAML
-python-docx
-pyulog        # analyse_ulog.py (Section 5)
