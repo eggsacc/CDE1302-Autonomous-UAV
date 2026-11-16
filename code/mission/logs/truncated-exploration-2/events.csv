@@ -1,0 +1,64 @@
+wall_time,run_s,mission_s,event,details
+2026-11-11 11:29:32.323,1.5940,,PROGRAM_START,mode=flight auto=False waypoints=4 drone=2
+2026-11-11 11:29:32.807,2.0780,,CONNECTED,"drone 2 at 192.168.1.202, pose (-0.00, 0.00) heading 0 deg"
+2026-11-11 11:29:32.807,2.0780,,PHASE,CONNECTING -> READY
+2026-11-11 11:29:37.135,6.4060,,OPERATOR,takeoff
+2026-11-11 11:29:37.135,6.4060,,HOME,"(0.001, 0.002) heading 0.0 deg (PX4 local NED)"
+2026-11-11 11:29:37.354,6.6250,,CMD_START,x3
+2026-11-11 11:29:37.135,6.4060,0.0000,TAKEOFF_CMD,CMD_START sent
+2026-11-11 11:29:37.354,6.6250,0.2190,PHASE,READY -> TAKING_OFF
+2026-11-11 11:29:45.167,14.4380,8.0320,CMD_GOTO,"x1 goal=(0.071, 0.056)"
+2026-11-11 11:29:45.167,14.4380,8.0320,GOTO,"hover probe -> (0.071, 0.056), 0.00 m, timeout 14 s"
+2026-11-11 11:29:45.276,14.5470,8.1410,OPERATOR,start
+2026-11-11 11:29:45.526,14.7970,8.3910,ARRIVED,"hover probe at (0.071, 0.041), 0.01 m from goal, 0.4 s"
+2026-11-11 11:29:45.526,14.7970,8.3910,FLYING_CONFIRMED,firmware answered the probe GOTO with ARRIVED
+2026-11-11 11:29:45.526,14.7970,8.3910,PHASE,TAKING_OFF -> HOVERING
+2026-11-11 11:29:48.557,17.8280,11.4220,OPERATOR,start
+2026-11-11 11:29:49.479,18.7500,12.3440,HOVER_CONFIRMED,"at (0.06, 0.07), 12.3 s after takeoff command"
+2026-11-11 11:29:49.495,18.7660,12.3600,PHASE,HOVERING -> EXPLORING (operator start)
+2026-11-11 11:29:49.495,18.7660,12.3600,HOME_TAG,"tag 29 at (-0.047, 0.090) from 75 sightings, 10 cm from the takeoff pose: landing spot"
+2026-11-11 11:29:49.495,18.7660,12.3600,ALIGNED,"plan turned +2.78 deg and moved onto home tag 29 at (-0.047, 0.090): 75 sightings, spread 0.7 deg"
+2026-11-11 11:29:49.495,18.7660,12.3600,TRAJECTORY,"sweep attempt 1: 179 pts, 35.6 s at 0.30 m/s, dt 200 ms, from (0.048, 0.066)"
+2026-11-11 11:29:49.682,18.9530,12.5470,CMD_TRAJ,id=154 179 pts dt=200 ms
+2026-11-11 11:29:50.042,19.3130,12.9070,TRAJ_STARTED,"sweep (attempt 1), ends in about 35.6 s"
+2026-11-11 11:29:51.901,21.1720,14.7660,TAG_CONFIRMED,id=2 x=1.176 y=-1.210 (5 sightings)
+2026-11-11 11:29:52.135,21.4060,15.0000,WAYPOINT_PASSED,"1/4 at (1.242, -1.408)"
+2026-11-11 11:29:53.620,22.8910,16.4850,TAG_CONFIRMED,id=4 x=2.541 y=-1.319 (5 sightings)
+2026-11-11 11:29:54.792,24.0630,17.6570,WAYPOINT_PASSED,"2/4 at (4.226, -1.336)"
+2026-11-11 11:29:57.588,26.8590,20.4530,WAYPOINT_PASSED,"3/4 at (4.379, 1.242)"
+2026-11-11 11:29:57.760,27.0310,20.6250,TAG_CONFIRMED,id=6 x=4.040 y=0.928 (5 sightings)
+2026-11-11 11:30:00.870,30.1410,23.7350,WAYPOINT_PASSED,"4/4 at (1.224, 1.338)"
+2026-11-11 11:30:00.995,30.2660,23.8600,TRAJ_END,"sweep: done after 11.0 s at (1.155, 1.314)"
+2026-11-11 11:30:00.995,30.2660,23.8600,PHASE,EXPLORING -> RETURNING (sweep complete)
+2026-11-11 11:30:00.995,30.2660,23.8600,TRAJECTORY,"return home attempt 1: 30 pts, 5.8 s at 0.30 m/s, dt 200 ms, from (1.155, 1.314)"
+2026-11-11 11:30:01.073,30.3440,23.9380,CMD_TRAJ,id=61 30 pts dt=200 ms
+2026-11-11 11:30:01.448,30.7190,24.3130,TRAJ_STARTED,"return home (attempt 1), ends in about 5.8 s"
+2026-11-11 11:30:03.151,32.4220,26.0160,TRAJ_END,"return home: done after 1.7 s at (-0.152, 0.000)"
+2026-11-11 11:30:03.276,32.5470,26.1410,LAND_TARGET,"home tag 29 seen 17 cm from the landing spot (9 sightings): moving over it at (0.098, 0.178), correction 1/3"
+2026-11-11 11:30:03.276,32.5470,26.1410,TRAJECTORY,"land correction attempt 1: 8 pts, 1.4 s at 0.30 m/s, dt 200 ms, from (-0.196, -0.043)"
+2026-11-11 11:30:03.338,32.6090,26.2030,CMD_TRAJ,id=26 8 pts dt=200 ms
+2026-11-11 11:30:03.604,32.8750,26.4690,TRAJ_STARTED,"land correction (attempt 1), ends in about 1.4 s"
+2026-11-11 11:30:05.073,34.3440,27.9380,TRAJ_END,"land correction: done after 1.5 s at (-0.046, 0.157)"
+2026-11-11 11:30:05.823,35.0940,28.6880,LAND_TARGET,"home tag 29 seen 19 cm from the landing spot (6 sightings): moving over it at (-0.043, 0.049), correction 2/3"
+2026-11-11 11:30:05.823,35.0940,28.6880,TRAJECTORY,"land correction attempt 1: 5 pts, 0.8 s at 0.30 m/s, dt 200 ms, from (0.129, 0.155)"
+2026-11-11 11:30:05.901,35.1720,28.7660,CMD_TRAJ,id=197 5 pts dt=200 ms
+2026-11-11 11:30:06.260,35.5310,29.1250,TRAJ_STARTED,"land correction (attempt 1), ends in about 0.8 s"
+2026-11-11 11:30:06.979,36.2500,29.8440,TRAJ_END,"land correction: done after 0.7 s at (0.066, 0.090)"
+2026-11-11 11:30:07.745,37.0160,30.6100,LAND_TARGET,"home tag 29 seen 10 cm from the landing spot (7 sightings): moving over it at (0.054, 0.076), correction 3/3"
+2026-11-11 11:30:07.745,37.0160,30.6100,TRAJECTORY,"land correction attempt 1: 3 pts, 0.4 s at 0.30 m/s, dt 200 ms, from (-0.039, 0.013)"
+2026-11-11 11:30:07.807,37.0780,30.6720,CMD_TRAJ,id=174 3 pts dt=200 ms
+2026-11-11 11:30:09.995,39.2660,32.8600,TRAJECTORY,"land correction attempt 2: 2 pts, 0.2 s at 0.30 m/s, dt 200 ms, from (0.056, 0.083)"
+2026-11-11 11:30:10.073,39.3440,32.9380,CMD_TRAJ,id=165 2 pts dt=200 ms
+2026-11-11 11:30:12.073,41.3440,34.9380,TRAJECTORY,"land correction attempt 3: 3 pts, 0.4 s at 0.30 m/s, dt 200 ms, from (0.072, 0.138)"
+2026-11-11 11:30:12.135,41.4060,35.0000,CMD_TRAJ,id=11 3 pts dt=200 ms
+2026-11-11 11:30:13.245,42.5160,36.1100,CMD_HOLD,x1
+2026-11-11 11:30:13.260,42.5310,36.1250,TAG_REPORT,3 tags -> tags_final.csv
+2026-11-11 11:30:13.276,42.5470,36.1410,LOC_FIT,"similarity: turn +2.09 deg, scale 1.0683, shift (+0.010, -0.084) m, rms 0.035 m over 3 fix(es) of tag(s) 22, 29"
+2026-11-11 11:30:13.276,42.5470,36.1410,LOC_DRIFT,"drift correction: hybrid (one transform, then the drift left interpolated in time); leave-one-out error (cm): global 16.4, time 31.7, hybrid 16.2"
+2026-11-11 11:30:13.479,42.7500,36.3440,CMD_LAND,x3
+2026-11-11 11:30:13.276,42.5470,36.1410,LAND_CMD,"CMD_LAND sent (search complete, still correcting after 10 s (5 cm from the home tag))"
+2026-11-11 11:30:13.479,42.7500,36.3440,PHASE,RETURNING -> LANDING
+2026-11-11 11:30:19.510,48.7810,42.3750,MISSION_COMPLETE,mission time 42.4 s (takeoff command -> land + 6 s)
+2026-11-11 11:30:19.510,48.7810,42.3750,PHASE,LANDING -> DONE
+2026-11-11 11:30:23.776,53.0470,46.6410,CORRECTION_SAVED,"correction.png, trajectory_corrected.csv"
+2026-11-11 11:30:23.792,53.0630,46.6570,PROGRAM_END,phase=DONE exit_code=0

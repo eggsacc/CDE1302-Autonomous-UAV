@@ -73,20 +73,19 @@ cluster together (median-based, outliers rejected).
 
 | Subsystem | Contents |
 |---|---|
-| [Software](cde1302/) | ESP32 firmware (`main/`), course laptop tools (`laptop/`), the search mission (`mission/`). Start with [`cde1302/mission/README.md`](cde1302/mission/README.md) to fly the mission |
-| [Mechanical](mechanical/) | Redesigned 3D-printed frame: stiffer arms, no print supports, faster assembly. CAD + STLs |
+| [Software](code/) | ESP32 firmware (`main/`), course laptop tools (`laptop/`), the search mission (`mission/`). [`code/README.md`](code/README.md) maps every folder; [`code/mission/README.md`](code/mission/README.md) explains how to fly the mission |
+| [Mechanical](frame/) | Redesigned 3D-printed frame: stiffer arms, no print supports, faster assembly. CAD + STLs |
 | [Electrical](electrical/) | Onboard hardware, wiring and network |
 
 ## Repository layout
 
 ```
-├── cde1302/              Software
+├── code/                 Software
 │   ├── main/             ESP32-S3 firmware (ESP-IDF, FreeRTOS)
 │   ├── laptop/           Course-provided laptop tools (comms, camera viewer, detector)
 │   ├── mission/          AprilTag search mission, simulator, tests, flight logs
 │   ├── trajectory/       MATLAB trajectory generators (course labs)
 │   └── waypoints/        Waypoint test files (course labs)
-├── mechanical/           Frame redesign: STEP, STLs, design notes
-├── electrical/           Hardware architecture and wiring
-└── UWB_documentation/    LinkTrack UWB datasheets (evaluated, not used)
+├── frame/                Frame redesign: STEP, STLs, design notes
+└── electrical/           Hardware architecture and wiring
 ```

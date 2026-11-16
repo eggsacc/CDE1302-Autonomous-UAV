@@ -1,0 +1,7 @@
+# Per-run mission logs. Only the two demo flights are tracked.
+logs/*
+!logs/full-exploration/
+!logs/truncated-exploration-2/
+
+# Test scratch folders (see tests/conftest.py)
+tests/.pytest_tmp/

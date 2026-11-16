@@ -1,0 +1,324 @@
+menu "Drone Configuration"
+
+    choice EXAMPLE_IP_MODE
+        prompt "IP Version"
+        depends on EXAMPLE_SOCKET_IP_INPUT_STRING
+        help
+            Example can use either IPV4 or IPV6.
+
+        config EXAMPLE_IPV4
+            bool "IPV4"
+
+        config EXAMPLE_IPV6
+            bool "IPV6"
+            select EXAMPLE_CONNECT_IPV6
+
+    endchoice
+
+    config WIFI_SSID
+        string "Wifi SSID"
+        default "safmc-wifi"
+        help
+            Name of wifi hotspot.
+
+    config WIFI_PASSWORD
+        string "Wifi Password"
+        default "epic-elliot"
+        help 
+            Wifi hotspot password.
+
+    config HOST_IPV4_ADDR
+        string "IPV4 Address"
+        default "192.168.1.100"
+        help
+            Laptop/QGroundControl IPv4 address to which the drone sends
+            MAVLink, telemetry, ToF debug, and its primary AprilTag debug
+            copy. Camera preview follows the latest viewer keepalive instead.
+
+    config DRONE_STATIC_IPV4_ADDR
+        string "Drone static IPv4 address"
+        default "192.168.1.200"
+        help
+            Static station address assigned to this ESP32. flash_drone.sh
+            sets this to 192.168.1.(200 + CONFIG_DRONE_ID).
+
+    config WIFI_GATEWAY_IPV4_ADDR
+        string "WiFi gateway IPv4 address"
+        default "192.168.1.1"
+        help
+            IPv4 address of the WiFi access point/router.
+
+    config WIFI_NETMASK_IPV4_ADDR
+        string "WiFi netmask"
+        default "255.255.255.0"
+        help
+            IPv4 netmask for the drone's static WiFi address.
+
+    config TOF_BRIDGE_PORT
+        int "TOF bridge port (outgoing)"
+        range 0 65535
+        default 3333
+        help
+          Port number to send TOF data to (outgoing data)
+
+    config MAVROS_BRIDGE_IN_PORT
+        int "Mavros bridge port (incoming)"
+        range 0 65535
+        default 8888
+        help
+          Port number for central compute to send mavlink packets to (incoming data)
+
+    config MAVROS_BRIDGE_OUT_PORT
+        int "Mavros bridge port (outgoing)"
+        range 0 65535
+        default 14550
+        help
+          Port number for central compute to send mavlink packets to (incoming data)
+
+    config APRILTAG_SEND_PORT
+        int "Port to send apriltag messages to"
+        range 0 65535
+        default 5000
+        help
+          Port to send apriltag messages to
+
+    config DRONE_ID
+        int "Drone ID (0-30)"
+        range 0 30
+        default 0
+        help
+          Unique identifier for this drone. Used in telemetry packets.
+
+    config TELEM_PORT
+        int "Telemetry UDP port (outgoing)"
+        range 0 65535
+        default 5005
+        help
+          UDP port on the laptop that receives telemetry packets.
+
+    config TOF_FRONT_SENSOR_IDX
+        int "Front-facing ToF sensor index (0-7)"
+        range 0 7
+        default 0
+        help
+          Which sensor (0-7) physically faces forward.
+          Sensors are mounted counter-clockwise, so sensor (N+1) is 45 deg to
+          the LEFT of sensor N.  Set this to the index of the sensor that faces
+          the drone's nose.
+
+    config TCA_SDA_GPIO_PORT
+        int "GPIO I2C SDA"
+        range 0 50
+        default 1
+        help
+          GPIO Port of the TCA SDA
+
+    config TCA_SCL_GPIO_PORT
+        int "GPIO I2C SCL"
+        range 0 50
+        default 2
+        help
+          GPIO Port of the TCA SCL
+
+    config PX4_TX_PIN 
+        int "GPIO PX4 TX PIN"
+        range 0 50
+        default 5
+        help
+          GPIO PX4 TX PIN
+
+    config PX4_RX_PIN 
+        int "GPIO PX4 RX PIN"
+        range 0 50
+        default 4
+        help
+          GPIO PX4 RX PIN
+
+    config CRUISE_ALT_CM
+        int "Flight height above the takeoff spot (cm)"
+        range 20 200
+        default 80
+        help
+          Takeoff climbs to this height and every GOTO and trajectory flies at it.
+          The laptop's tag filter must accept tags this far below the drone:
+          mission/config.yaml tags.max_down_m (and tags.expected_down_m).
+          Higher sees more floor per frame (wider lanes possible) but each tag
+          is smaller in the image.
+
+    config TRAJ_WAYPOINTS
+        bool "Trajectory: fly straight from corner to corner"
+        default y
+        help
+          The setpoint jumps straight to the next lane end and stays there until
+          the drone is within TRAJ_CORNER_CM, then jumps to the next one. PX4
+          speeds up and slows down by itself; the top speed is MPC_XY_VEL_MAX.
+          Heading stays fixed at the takeoff heading. The lookahead below is not
+          used in this mode.
+          Off = follow mode (TRAJ_FEEDFORWARD) or the TRAJ_LOOKAHEAD_CM carrot.
+
+    config TRAJ_FEEDFORWARD
+        bool "Trajectory: steady speed with velocity feedforward (follow mode)"
+        depends on !TRAJ_WAYPOINTS
+        default y
+        help
+          The target sits just ahead of the drone's progress along the path,
+          and PX4 also gets the planned velocity as feedforward. The speed is
+          then flight.cruise_speed_mps from mission/config.yaml (not gain x
+          lookahead), ramped at TRAJ_ACCEL_CMS2 after each corner and down to
+          5 cm/s by TRAJ_CORNER_CM before the next. The position error is only
+          the sideways correction, so the drone holds the lane line without
+          the surge-and-brake of the plain carrot. TRAJ_LOOKAHEAD_CM is not
+          used. Off = the TRAJ_LOOKAHEAD_CM carrot.
+
+    config TRAJ_ACCEL_CMS2
+        int "Trajectory: speed-up / slow-down rate (cm/s^2)"
+        depends on TRAJ_FEEDFORWARD
+        range 5 200
+        default 30
+        help
+          How fast follow mode changes speed at lane starts and corners.
+          30 cm/s^2 takes 0.8 s and 10 cm to reach 0.25 m/s.
+
+    config TRAJ_LOOKAHEAD_CM
+        int "Trajectory: target distance ahead of the drone (cm)"
+        range 0 100
+        default 25
+        help
+          The target stays this far ahead along the path. PX4's speed is about
+          MPC_XY_P x this distance, so this sets the flight speed: 25 cm is
+          about 0.24 m/s at the default gain. Longer is smoother and faster but
+          holds the line less tightly.
+          0 = play on the clock at the planned speed, whether or not the drone
+          keeps up.
+
+    config TRAJ_CORNER_CM
+        int "Trajectory: how close to get to each corner (cm)"
+        range 0 100
+        default 15
+        help
+          At each lane end and at the last point the target stops until the
+          drone is this close (in waypoint mode: the waypoint radius, min 5 cm).
+          Carrot: keep below the lookahead, or the drone will not slow down for
+          corners; 0 = no stop at corners. Follow mode: about 5 cm (min 3 cm);
+          the speed is already down to 5 cm/s here, so it turns cleanly.
+
+    config CAMERA_STREAM_DEFAULT_FPS
+        int "Camera preview default frame rate"
+        range 1 15
+        default 10
+        help
+          Used when laptop/camera_stream.py does not pass --fps.
+
+    config CAMERA_STREAM_DEFAULT_QUALITY
+        int "Camera preview default JPEG quality"
+        range 10 90
+        default 60
+        help
+          Used when laptop/camera_stream.py does not pass --quality.
+
+    config CAMERA_EXPOSURE_LINES
+        int "Camera exposure, fixed (sensor lines, 0 = auto)"
+        range 0 4095
+        default 0
+        help
+          Shorter exposure = less motion blur, darker image. 0 leaves auto
+          exposure on. With auto on, the serial log prints
+          "camera: exposure N lines of M (auto), gain Gx" every 5 s: fly under
+          your lights, read N, then try about half of it here.
+          In lines of the sensor (OV3660): one frame is M lines, so the
+          exposure time is N/M of a frame. Ignored on sensors other than the
+          OV3660 / OV2640 (OV2640: 0-1200).
+
+    config CAMERA_GAIN
+        int "Camera gain, fixed (1-64 x, 0 = auto)"
+        range 0 64
+        default 0
+        help
+          0 = automatic gain: with a fixed exposure it brightens the image by
+          itself, up to 128x. Set a value only if the auto gain hunts or the
+          image is still too dark. More gain = more noise; AprilTags cope
+          with noise far better than with blur.
+
+endmenu
+
+menu "UWB (LinkTrack)"
+
+    config UWB_ENABLED
+        bool "Read a LinkTrack UWB tag on UART2"
+        default n
+        help
+          Starts uwb_task (main/uwb_task.c). Off: the firmware is exactly as
+          without UWB. See mission/UWB_ESP32_BENCH_TEST.md.
+
+    config UWB_RX_PIN
+        int "ESP32 GPIO wired to the module's TX (-1 = not set)"
+        depends on UWB_ENABLED
+        range -1 48
+        default -1
+        help
+          Must be a free pin. Pins used by PX4, the camera, flash/PSRAM, USB,
+          the console or boot strapping are refused at start-up (see the log).
+
+    config UWB_TX_PIN
+        int "ESP32 GPIO wired to the module's RX (-1 = not connected)"
+        depends on UWB_ENABLED
+        range -1 48
+        default -1
+        help
+          Not needed: the drone only reads the module. Leave -1.
+
+    config UWB_BAUD
+        int "UART baud rate"
+        depends on UWB_ENABLED
+        range 9600 3000000
+        default 921600
+        help
+          Must match the module (NAssistant). LinkTrack default: 921600.
+
+    config UWB_LOG_PERIOD_MS
+        int "Serial status log period (ms)"
+        depends on UWB_ENABLED
+        range 200 60000
+        default 2000
+
+    config UWB_DEBUG_UDP
+        bool "Stream raw frames + PX4 pose to the laptop (UDP)"
+        depends on UWB_ENABLED
+        default y
+        help
+          Sent to HOST_IPV4_ADDR. Read with: python mission/tools/uwb_sniff.py --udp 5010
+
+    config UWB_DEBUG_PORT
+        int "Laptop UDP port for the UWB debug stream"
+        depends on UWB_DEBUG_UDP
+        range 1 65535
+        default 5010
+
+    config UWB_SEND_TO_PX4
+        bool "Send UWB position to PX4 (ODOMETRY)"
+        depends on UWB_DEBUG_UDP
+        default n
+        help
+          Once the laptop has sent an alignment (CMD_UWB_ALIGN), send each good
+          UWB fix to PX4 as position-only ODOMETRY in MAV_FRAME_LOCAL_FRD, and
+          answer PX4's TIMESYNC requests. The alignment needs the debug stream.
+          PX4 needs EKF2_EV_CTRL = 1. See mission/UWB_PX4_FLIGHT_TEST.md.
+
+    config UWB_PX4_MAX_EOP_CM
+        int "Largest x/y eop sent to PX4 (cm)"
+        depends on UWB_SEND_TO_PX4
+        range 1 254
+        default 100
+        help
+          Readings whose x or y precision estimate is worse are not sent. Keep
+          it generous: gaps make PX4 restart UWB fusion and snap to the next
+          reading unchecked. Each reading's precision goes to PX4 as its
+          variance, so PX4 itself gives poor readings little weight.
+
+    config UWB_DEBUG_PERIOD_MS
+        int "Debug stream send period (ms)"
+        depends on UWB_DEBUG_UDP
+        range 20 1000
+        default 100
+
+endmenu
