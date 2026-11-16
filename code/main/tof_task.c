@@ -1,20 +1,13 @@
 #include "tof_task.h"
 
-#include "vl53l5cx_api.h"
-#include "platform.h"
-
-#include "driver/i2c_master.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
-#include "esp_log.h"
 #include "esp_timer.h"
 
 #include <math.h>
 #include <string.h>
 #include <float.h>
-
-static const char *TAG = "tof";
 
 // ---------------------------------------------------------------------------
 // Sensor angle table (body frame, degrees, CW from forward)
@@ -23,28 +16,11 @@ static const char *TAG = "tof";
 static float SENSOR_ANGLES[TOF_SENSOR_COUNT];
 
 // ---------------------------------------------------------------------------
-// Shared scan state — written by tof_task, read by mission_task
+// Shared scan state. The VL53L5CX ring and its driver were removed, so nothing
+// writes it: the accessors below return an empty scan (no sensors, no ranges).
 // ---------------------------------------------------------------------------
 static tof_scan_t    s_scan;
 static SemaphoreHandle_t s_scan_mutex;
-
-// ---------------------------------------------------------------------------
-// I2C / hardware handles (private to this file)
-// ---------------------------------------------------------------------------
-static i2c_master_bus_handle_t  s_bus_handle;
-static i2c_master_dev_handle_t  s_tca_handle;
-
-static VL53L5CX_Configuration   s_dev;           // single shared device, mux-switched
-static uint8_t                  s_sensor_ok[TOF_SENSOR_COUNT]; // 1 = sensor ready
-
-// ---------------------------------------------------------------------------
-// TCA9548A mux helper
-// ---------------------------------------------------------------------------
-static esp_err_t tca_select(uint8_t port)
-{
-    uint8_t flag = (uint8_t)(1u << port);
-    return i2c_master_transmit(s_tca_handle, &flag, 1, -1);
-}
 
 // ---------------------------------------------------------------------------
 // Compute minimum range (metres) from a stored tof_frame_t.
@@ -76,49 +52,6 @@ static float frame_min_range_m(const tof_frame_t *f)
         }
     }
     return min_m;
-}
-
-// ---------------------------------------------------------------------------
-// Initialise one sensor via the mux
-// Returns true on success.
-// ---------------------------------------------------------------------------
-static bool init_sensor(uint8_t idx)
-{
-    esp_err_t err = tca_select(idx);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "[%d] TCA select failed: %d", idx, err);
-        return false;
-    }
-
-    uint8_t alive = 0;
-    if (vl53l5cx_is_alive(&s_dev, &alive) || !alive) {
-        ESP_LOGW(TAG, "[%d] not detected", idx);
-        return false;
-    }
-
-    if (vl53l5cx_init(&s_dev)) {
-        ESP_LOGE(TAG, "[%d] init failed", idx);
-        return false;
-    }
-
-    if (vl53l5cx_set_ranging_frequency_hz(&s_dev, TOF_RANGING_FREQ_HZ)) {
-        ESP_LOGE(TAG, "[%d] set freq failed", idx);
-        return false;
-    }
-
-    if (vl53l5cx_set_resolution(&s_dev, VL53L5CX_RESOLUTION_8X8)) {
-        ESP_LOGE(TAG, "[%d] set resolution failed", idx);
-        return false;
-    }
-
-    if (vl53l5cx_start_ranging(&s_dev)) {
-        ESP_LOGE(TAG, "[%d] start ranging failed", idx);
-        return false;
-    }
-
-    ESP_LOGI(TAG, "[%d] OK — %.0f° @ %dHz 8x8",
-             idx, SENSOR_ANGLES[idx], TOF_RANGING_FREQ_HZ);
-    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -290,188 +223,4 @@ tof_scan_collapsed_t tof_get_collapsed_scan(void)
     }
 
     return out;
-}
-
-// ---------------------------------------------------------------------------
-// FreeRTOS task
-// ---------------------------------------------------------------------------
-
-void tof_task(void *arg)
-{
-    // ---- I2C master bus ----
-    i2c_master_bus_config_t bus_cfg = {
-        .clk_source             = I2C_CLK_SRC_DEFAULT,
-        .i2c_port               = TOF_I2C_PORT,
-        .scl_io_num             = TOF_SCL_PIN,
-        .sda_io_num             = TOF_SDA_PIN,
-        .glitch_ignore_cnt      = 7,
-        .flags.enable_internal_pullup = true,
-    };
-    ESP_ERROR_CHECK(i2c_new_master_bus(&bus_cfg, &s_bus_handle));
-    ESP_LOGI(TAG, "I2C master bus created");
-
-    // ---- TCA9548A mux ----
-    i2c_device_config_t tca_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address  = TCA_I2C_ADDR,
-        .scl_speed_hz    = 100000,
-    };
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(s_bus_handle, &tca_cfg, &s_tca_handle));
-    ESP_LOGI(TAG, "TCA9548A registered");
-
-    // ---- VL53L5CX shared device handle ----
-    i2c_device_config_t vl_cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address  = VL53L5CX_DEFAULT_I2C_ADDRESS >> 1,
-        .scl_speed_hz    = VL53L5CX_MAX_CLK_SPEED,
-    };
-    s_dev.platform.bus_config = bus_cfg;
-    ESP_ERROR_CHECK(i2c_master_bus_add_device(s_bus_handle, &vl_cfg, &s_dev.platform.handle));
-
-    // ---- Init all 8 sensors — retry until all are up ----
-    // mission_task blocks arming until tof_sensors_ok_count() == TOF_SENSOR_COUNT,
-    // so we must keep retrying here rather than giving up after one pass.
-    for (;;) {
-        int ok_count = 0;
-        for (int i = 0; i < TOF_SENSOR_COUNT; i++) {
-            if (s_sensor_ok[i]) { ok_count++; continue; }   // already up
-
-            s_sensor_ok[i] = init_sensor(i) ? 1 : 0;
-            if (!s_sensor_ok[i]) {
-                // Bus may be stuck — reset and give it a moment before next pass
-                i2c_master_bus_reset(s_bus_handle);
-                vTaskDelay(pdMS_TO_TICKS(50));
-            }
-
-            xSemaphoreTake(s_scan_mutex, portMAX_DELAY);
-            s_scan.sensor_ok[i] = s_sensor_ok[i];
-            xSemaphoreGive(s_scan_mutex);
-
-            if (s_sensor_ok[i]) ok_count++;
-        }
-
-        ESP_LOGI(TAG, "%d / %d sensors ready", ok_count, TOF_SENSOR_COUNT);
-        if (ok_count == TOF_SENSOR_COUNT) break;
-
-        ESP_LOGW(TAG, "Retrying failed sensors in 500 ms...");
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
-
-    // ---- Round-robin polling loop ----
-    // Pattern from mapper.c: select mux, check data ready, extract if ready.
-    // We use vTaskDelayUntil to keep a steady per-sensor cadence.
-    VL53L5CX_ResultsData results;
-    TickType_t last_wake = xTaskGetTickCount();
-
-    // I2C bus recovery: after TOF_BUS_FAIL_THRESHOLD consecutive failures
-    // across any sensor, reset the bus and re-init all sensors.
-    #define TOF_BUS_FAIL_THRESHOLD  10
-    int consecutive_fails = 0;
-
-    for (uint8_t sensor = 0; ; sensor = (sensor + 1) % TOF_SENSOR_COUNT) {
-
-        // ---- I2C bus recovery ----
-        if (consecutive_fails >= TOF_BUS_FAIL_THRESHOLD) {
-            ESP_LOGE(TAG, "I2C bus hung (%d consecutive failures) — resetting",
-                     consecutive_fails);
-
-            // Invalidate all frames so nav_task holds position during recovery
-            xSemaphoreTake(s_scan_mutex, portMAX_DELAY);
-            for (int i = 0; i < TOF_SENSOR_COUNT; i++) {
-                s_scan.frame[i].valid = 0;
-                s_scan.sensor_ok[i]   = 0;
-            }
-            xSemaphoreGive(s_scan_mutex);
-
-            // Reset the I2C bus (sends 9 SCL clocks to release a stuck SDA)
-            esp_err_t err = i2c_master_bus_reset(s_bus_handle);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "i2c_master_bus_reset failed: %d", err);
-            }
-            vTaskDelay(pdMS_TO_TICKS(100));
-
-            // Re-init all sensors
-            for (int i = 0; i < TOF_SENSOR_COUNT; i++) {
-                s_sensor_ok[i] = init_sensor(i) ? 1 : 0;
-                xSemaphoreTake(s_scan_mutex, portMAX_DELAY);
-                s_scan.sensor_ok[i] = s_sensor_ok[i];
-                xSemaphoreGive(s_scan_mutex);
-            }
-
-            int ok_count = 0;
-            for (int i = 0; i < TOF_SENSOR_COUNT; i++) ok_count += s_sensor_ok[i];
-            ESP_LOGW(TAG, "Bus recovery complete — %d / %d sensors restored",
-                     ok_count, TOF_SENSOR_COUNT);
-
-            consecutive_fails = 0;
-            last_wake = xTaskGetTickCount();
-            continue;
-        }
-
-        // Periodically re-attempt init on any sensor that dropped out
-        if (!s_sensor_ok[sensor]) {
-            uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
-            static uint32_t last_reinit_ms[TOF_SENSOR_COUNT] = {0};
-            if ((now_ms - last_reinit_ms[sensor]) >= 2000) {
-                last_reinit_ms[sensor] = now_ms;
-                ESP_LOGW(TAG, "[%d] sensor offline — attempting re-init", sensor);
-                s_sensor_ok[sensor] = init_sensor(sensor) ? 1 : 0;
-                xSemaphoreTake(s_scan_mutex, portMAX_DELAY);
-                s_scan.sensor_ok[sensor] = s_sensor_ok[sensor];
-                xSemaphoreGive(s_scan_mutex);
-                if (s_sensor_ok[sensor])
-                    ESP_LOGI(TAG, "[%d] sensor recovered", sensor);
-            }
-            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(8));
-            continue;
-        }
-
-        // Select this sensor on the mux
-        if (tca_select(sensor) != ESP_OK) {
-            ESP_LOGW(TAG, "[%d] mux select failed", sensor);
-            consecutive_fails++;
-            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(8));
-            continue;
-        }
-
-        // Non-blocking data-ready check
-        uint8_t is_ready = 0;
-        uint8_t status = vl53l5cx_check_data_ready(&s_dev, &is_ready);
-        if (status) {
-            ESP_LOGD(TAG, "[%d] check_data_ready status=%d", sensor, status);
-            consecutive_fails++;
-            vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(8));
-            continue;
-        }
-
-        // Successful I2C transaction — reset failure counter
-        consecutive_fails = 0;
-
-        if (is_ready) {
-            status = vl53l5cx_get_ranging_data(&s_dev, &results);
-            if (status) {
-                ESP_LOGD(TAG, "[%d] get_ranging_data status=%d", sensor, status);
-            } else {
-                uint32_t now_ms = (uint32_t)(esp_timer_get_time() / 1000);
-
-                // Copy the full 64-pixel frame into the shared scan buffer.
-                // distance_mm and target_status are the same array sizes as
-                // TOF_PIXELS_PER_SENSOR (VL53L5CX_RESOLUTION_8X8 * NB_TARGET_PER_ZONE).
-                xSemaphoreTake(s_scan_mutex, portMAX_DELAY);
-                memcpy(s_scan.frame[sensor].distance_mm,
-                       results.distance_mm,
-                       TOF_PIXELS_PER_SENSOR * sizeof(uint16_t));
-                memcpy(s_scan.frame[sensor].target_status,
-                       results.target_status,
-                       TOF_PIXELS_PER_SENSOR * sizeof(uint8_t));
-                s_scan.frame[sensor].timestamp_ms = now_ms;
-                s_scan.frame[sensor].valid        = 1;
-                xSemaphoreGive(s_scan_mutex);
-            }
-        }
-
-        // Yield for 8ms — 8 sensors × 8ms = 64ms full cycle ≈ 15 Hz,
-        // matching the sensor ranging frequency so we read nearly every frame.
-        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(8));
-    }
 }

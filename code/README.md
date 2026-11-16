@@ -13,57 +13,23 @@ extended by us, `laptop/` is course code kept as-is, and `mission/` is ours.
 
 ```
 code/
-├── main/                  ESP32-S3 firmware (ESP-IDF, FreeRTOS)
-│   ├── main.c             Startup, task creation, takeoff/landing state machine (mission_task)
-│   ├── mavlink_task.c     UART link to PX4: telemetry, setpoints at 20 Hz, QGC MAVLink bridge
-│   ├── wifi_task.c        UDP telemetry to the laptop (5005) and commands from it (5006)
-│   ├── nav_task.c         Runs an uploaded trajectory through traj_gate (also course VFH code, unused)
-│   ├── traj_gate.c        Where the setpoint sits along the path: waypoint / follow / carrot modes
-│   ├── camera_stream.c    JPEG stream to the laptop (5009), each frame tagged with the PX4 pose
-│   ├── pose_hist.c        Pose history, so a frame gets the pose at its capture time
-│   ├── at_detect.c        Onboard AprilTag detector (debug only; starts the camera stream)
-│   ├── uwb_*.c, nlink_parser.c   LinkTrack UWB support (built, not used in the final mission)
-│   ├── tof_task.c, vfh.c, odom.c Course template: ToF ring + obstacle avoidance (compiled out)
-│   └── Kconfig.projbuild  `idf.py menuconfig` → Drone Configuration (drone ID, trajectory mode, UWB, camera)
-│
-├── mission/               Our AprilTag search mission (laptop, Python)
-│   ├── mission.py         Entry point: state machine CONNECTING → … → EXPLORING → RETURNING → LANDING
-│   ├── config.yaml        Every mission number (area, sweep, speeds, safety, camera, localisation tags)
-│   ├── settings.py        Loads and validates config.yaml
-│   ├── planner.py         Lawnmower (boustrophedon) waypoints
-│   ├── trajectory.py      Waypoints → constant-speed trajectory for the firmware
-│   ├── drone_link.py      Telemetry, commands and pose history for the real drone
-│   ├── tag_pipeline.py    Camera frames → AprilTag detections → Sightings in PX4 NED
-│   ├── camera_mount.py, frame_pose.py   Camera → body transform; pose embedded in each JPEG
-│   ├── tag_map.py         Clusters sightings into one position per tag
-│   ├── localisation.py    Localisation-tag drift correction (fit PX4 → arena transform) + precision landing
-│   ├── correction_plot.py Before/after picture of that correction (correction.png)
-│   ├── gyro_cal.py        Gyro calibration from the laptop (`calibrate` command)
-│   ├── mission_log.py     Writes the per-run log folder
-│   ├── live_map.py        Live 2-D map window (`--map`)
-│   ├── sim.py, synth_camera.py   Simulator: fake drone + rendered camera frames
-│   ├── uwb_*.py, nlink.py UWB alignment and decoding (not used in the final mission)
-│   ├── UWB_*.md           UWB bench and flight test procedures
-│   ├── tools/             relocalise.py (redo the correction from a log), loc_layout.py (place loc tags),
-│   │                      cam_bench.py (camera calibration), compare_flights.py, UWB bench tools
-│   ├── tests/             pytest suite; test_*_c.py compile the C firmware modules and test them on the laptop
-│   ├── logs/              Run logs. Tracked: full-exploration/ and truncated-exploration-2/ (the demo flights)
-│   └── px4_logs/          PX4 flight logs (.ulg) of the two demo flights
-│
-├── laptop/                Course-provided laptop tools (kept as-is; mission/ imports from it)
-│   ├── comms.py, protocol.py      UDP link and wire format shared with the firmware
-│   ├── apriltag_host.py           The firmware's own esp-apriltag detector, compiled for the laptop
-│   ├── camera_stream.py, tag_stream.py   Live camera viewers (connection checks)
-│   ├── simple_*.py, send_trajectory.py   Lab 5 flight scripts
-│   └── run_*.py, exploration.py, relay.py, …   Course swarm template, not used by us
-│
-├── components/            Vendored third-party: MAVLink, esp-apriltag (tag16h5 restored to IDs 0-29), VL53L5CX
-├── managed_components/    ESP-IDF component manager deps (esp32-camera, esp_jpeg)
-├── tools/                 Pinned ESP-IDF version and Windows install/activate scripts
-├── trajectory/            Lab 5: MATLAB trajectory generators and CSVs
-├── waypoints/             Lab 5: waypoint files and test guide
-├── sdkconfig              Firmware configuration as flashed on our drone
-└── flash_drone.sh         macOS build + flash script (course)
+├── mission/          Our AprilTag search mission (laptop, Python)
+│   ├── mission.py        Entry point and state machine
+│   ├── config.yaml       Every mission setting
+│   ├── localisation.py   Localisation-tag drift correction and precision landing
+│   ├── tag_pipeline.py   Camera frames → tag positions
+│   ├── tools/            Offline tools (redo the correction from a log, place loc tags, camera bench)
+│   ├── tests/            pytest suite, including the firmware's C modules
+│   ├── logs/             The two demo flights' run logs
+│   └── px4_logs/         The two demo flights' PX4 logs (.ulg)
+├── main/             ESP32-S3 firmware (ESP-IDF, FreeRTOS)
+│   ├── traj_gate.c       Path following: where the setpoint goes next
+│   ├── mavlink_task.c    Link to PX4 and the QGroundControl bridge
+│   └── camera_stream.c   Camera stream, each frame tagged with the drone's pose
+├── laptop/           Course-provided laptop tools (comms, camera viewers, detector, Lab 5 scripts)
+├── components/       Vendored libraries: MAVLink, esp-apriltag
+├── tools/            Pinned ESP-IDF version and install scripts
+└── trajectory/, waypoints/   Course Lab 5 material
 ```
 
 Quick pointers:
@@ -128,8 +94,7 @@ close these before starting `mission.py`.
 
 **QGroundControl over Wi-Fi:** the ESP32 forwards PX4's MAVLink. Add a UDP
 link in QGC: listening port 14550, target host `192.168.1.202`, target port
-8888. Close QGC before `calibrate` or `check_px4_esp32_link.py`, which use the
-same port.
+8888. Close QGC before `check_px4_esp32_link.py`, which uses the same port.
 
 ## Run the mission
 
@@ -138,7 +103,7 @@ Full procedure, PX4 parameters and troubleshooting:
 
 ```bash
 python mission/mission.py --sim --auto --map   # simulator, no drone
-python mission/mission.py --map                # real flight: `calibrate`, `takeoff`, then `start`
+python mission/mission.py --map                # real flight: type `takeoff`, then `start`
 python mission/tools/relocalise.py mission/logs/<run> --plot   # redo the drift correction from a log
 python mission/planner.py --plot               # preview the sweep
 ```

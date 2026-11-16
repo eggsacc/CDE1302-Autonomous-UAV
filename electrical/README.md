@@ -63,7 +63,7 @@ motors (Wi-Fi kill switch).
   flight area is too small for UWB to improve on optical flow. The LinkTrack
   datasheets are not included in the repo.
 - **VL53L5CX ToF ring:** obstacle avoidance from the course template.
-  It is compiled out (`TOF_ENABLED 0` in `main/tof_task.h`).
+  Not fitted; its driver was removed from the firmware.
 
 ## Power budget
 

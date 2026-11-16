@@ -2,32 +2,18 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "driver/i2c_master.h"
 
 // ---------------------------------------------------------------------------
 // Hardware config
 // ---------------------------------------------------------------------------
-// Set to 0 when the ToF ring / TCA9548A mux is not fitted.  Skips the tof_task
-// spawn (and its endless I2C init retries) plus the pre-arm sensor check.
-// nav_task runs in direct-waypoint mode and does not consume ToF data, so 0 is
-// safe for waypoint testing.  tof_task_init() still runs either way so the
-// tof_get_*() accessors used by wifi_task stay valid (they return zeros).
-#define TOF_ENABLED             0
+// The VL53L5CX ToF ring (course template) is not fitted and its driver has been
+// removed. Only the scan buffer and accessors remain, because nav_task and
+// wifi_task still call them; they always report no sensors and no ranges.
 
 #define TOF_SENSOR_COUNT        8
 #define TOF_SENSOR_RESO         8
-#define TOF_I2C_PORT            I2C_NUM_0
-#define TOF_SDA_PIN             CONFIG_TCA_SDA_GPIO_PORT   // from menuconfig
-#define TOF_SCL_PIN             CONFIG_TCA_SCL_GPIO_PORT
-#define TCA_I2C_ADDR            0x70
-#define TOF_RANGING_FREQ_HZ     15
 #define TOF_MAX_VALID_MM        3000    // discard readings above this (sensor max is 4m)
 #define TOF_MIN_VALID_MM        50      // discard readings below this (sensor blind zone)
-
-// FreeRTOS placement — Core 0, below mavlink but above mission
-#define TOF_TASK_CORE           0
-#define TOF_TASK_PRIORITY       4
-#define TOF_TASK_STACK          8192
 
 // ---------------------------------------------------------------------------
 // Sensor angular layout
@@ -69,14 +55,8 @@ typedef struct {
 // Init & task entry
 // ---------------------------------------------------------------------------
 
-// Call once before spawning the task.
-// Creates the I2C master bus internally.
+// Call once at startup: creates the scan mutex the accessors take.
 void tof_task_init(void);
-
-// FreeRTOS task entry — pin to Core 0, Priority 4
-// xTaskCreatePinnedToCore(tof_task, "tof", TOF_TASK_STACK,
-//                         NULL, TOF_TASK_PRIORITY, NULL, TOF_TASK_CORE);
-void tof_task(void *arg);
 
 // ---------------------------------------------------------------------------
 // Data access API (thread-safe, call from mission_task)

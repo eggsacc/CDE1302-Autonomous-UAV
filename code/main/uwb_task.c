@@ -106,11 +106,6 @@ static bool pin_ok(int pin, const char *name)
     if (!why && (pin == 19 || pin == 20)) why = "USB";
     if (!why && (pin == 43 || pin == 44)) why = "the serial console (UART0)";
     if (!why && (pin == 0 || pin == 45 || pin == 46)) why = "a boot strapping pin";
-#if TOF_ENABLED
-    if (!why && (pin == CONFIG_TCA_SDA_GPIO_PORT || pin == CONFIG_TCA_SCL_GPIO_PORT)) {
-        why = "the ToF I2C bus";
-    }
-#endif
     if (why) {
         ESP_LOGE(TAG, "%s=GPIO%d is used by %s; pick a free pin in menuconfig", name, pin, why);
         return false;

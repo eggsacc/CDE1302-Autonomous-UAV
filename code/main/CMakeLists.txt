@@ -18,7 +18,6 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES
         mavlink
-        vl53l5cx
         esp_driver_i2c
         esp_driver_uart
         esp_driver_gpio
@@ -33,5 +32,5 @@ idf_component_register(
         lwip
 )
 
-# Suppress -Waddress-of-packed-member from MAVLink and VL53L5CX generated headers
+# Suppress -Waddress-of-packed-member from MAVLink generated headers
 target_compile_options(__idf_main PRIVATE -Wno-address-of-packed-member)

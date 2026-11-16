@@ -30,8 +30,9 @@ by localisation tags) and the route it flew.
 
 Present but not used in the final mission: UWB (`main/uwb_*`,
 `main/nlink_parser.*`, `mission/uwb_*.py`, `mission/nlink.py`;
-`uwb.send_to_px4` stays `false`; test procedures in `mission/UWB_*.md`); the ToF ring and VFH avoidance
-(`TOF_ENABLED 0`); the course swarm scripts in `laptop/` (`run_*.py`,
+`uwb.send_to_px4` stays `false`; test procedures in `mission/UWB_*.md`); VFH obstacle
+avoidance (its VL53L5CX ToF driver was removed, so `tof_task.c` only keeps an
+always-empty scan for `nav_task`/`wifi_task`); the course swarm scripts in `laptop/` (`run_*.py`,
 `exploration.py`, `relay.py`, …). Don't remove them without asking.
 
 ## Data flow
@@ -119,8 +120,10 @@ switch.
   `--write` overwrite files in the run folder they're given.
 - Only one camera viewer can stream at a time. Don't run `tag_stream.py` or
   `camera_stream.py` alongside `mission.py`.
-- `calibrate` and `laptop/check_px4_esp32_link.py` use UDP 14550, so
-  QGroundControl must be closed.
+- `laptop/check_px4_esp32_link.py` uses UDP 14550, so QGroundControl must be
+  closed.
+- `settings.py` skips a few retired keys (`_RETIRED_KEYS`, from the removed
+  gyro calibration) so old run logs' `config_used.yaml` still load.
 - `CONFIG_HOST_IPV4_ADDR` in `QGC_MAVLINK_BRIDGE.md` (192.168.50.x) is stale;
   the real value is in `sdkconfig` (192.168.1.102).
 - `laptop/` docs (`TEST_GUIDE.md`) use example drone 22 and `python3`; on

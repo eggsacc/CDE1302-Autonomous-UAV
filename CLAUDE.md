@@ -25,7 +25,7 @@ flexible. The redesign is in `frame/`; its source repo is
 | `code/mission/` | **Our mission code**: `mission.py` (state machine), `planner.py`, `trajectory.py`, `tag_pipeline.py`, `tag_map.py`, `localisation.py`, `live_map.py`, `sim.py`, `config.yaml`, tests, `tools/` | ours |
 | `code/mission/logs/` | Per-run flight logs. Gitignored except the two demo flights, `full-exploration/` and `truncated-exploration-2/` | generated |
 | `code/trajectory/`, `code/waypoints/` | Lab 5 trajectory / waypoint material | course |
-| `code/components/`, `managed_components/` | Vendored MAVLink, esp-apriltag, VL53L5CX, esp32-camera | third-party, don't edit |
+| `code/components/`, `managed_components/` | Vendored MAVLink, esp-apriltag, esp32-camera | third-party, don't edit |
 | `frame/` | Frame redesign: `README.md` (design notes + print guide), `STEP/`, `STLs/`, `assets/` | ours |
 | `electrical/` | Hardware architecture, wiring, network | ours |
 | `code/AGENTS.md` | Agent guide for working inside `code/` | ours |
@@ -52,7 +52,9 @@ GPIO5 TX). Laptop and drone share a dedicated router.
 
 **Not used:** LinkTrack **UWB** (the flight area is too small for it to help;
 code exists in `uwb_*` files, `uwb.send_to_px4` should stay `false`) and the
-**VL53L5CX ToF ring** (compiled out, `TOF_ENABLED 0`).
+**VL53L5CX ToF ring** (its driver component was removed; `tof_task.c` keeps an
+always-empty scan). The laptop-side gyro calibration (`calibrate`) was removed:
+it never worked.
 
 ## Data flow and control
 
