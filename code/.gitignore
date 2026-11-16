@@ -22,7 +22,7 @@ venv/
 # macOS
 .DS_Store
 
-# Bench-only firmware settings applied by flash_drone.sh (see mission/UWB_ESP32_BENCH_TEST.md)
+# Bench-only firmware settings applied by flash_drone.sh
 sdkconfig.local
 
 # loc_layout.py keeps the previous config here
