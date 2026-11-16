@@ -4,3 +4,7 @@ __pycache__/
 build/
 install/
 log/
+
+# Reference material for the report, kept locally only
+odom_analysis/
+UWB_documentation/

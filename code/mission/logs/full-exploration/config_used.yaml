@@ -1,0 +1,242 @@
+# Mini project mission settings.
+# Coordinates are PX4 local NED in metres: x = North, y = East.
+# The origin is where PX4's EKF2 started (normally where the drone sat at
+# power-up, i.e. the takeoff spot). mission.py records the pose at CMD_START as
+# "home", logs it, and returns there before landing. Tag positions are
+# reported in this same raw PX4 frame, so they line up with the .ulg log.
+#
+# Every number the mission uses lives here. mission/settings.py loads and
+# validates this file and rejects unknown keys, so a typo fails loudly.
+
+drone_id: 2              # ESP32 CONFIG_DRONE_ID; drone IP = 192.168.1.(200 + id)
+
+# Search area, in the arena frame (x forward from the home tag, y to the right).
+# The floor is a grid of nodes 0.46 m apart; node (a, b) = x b*0.46, y a*0.46.
+# Play area corners: nodes (-4, 2), (-4, 10), (3, 2), (3, 10).
+area:
+  x_min: 0.92            # m: node row 2 (the start box is behind the area)
+  x_max: 4.6             # m: node row 10
+  y_min: -1.84           # m: node column -4
+  y_max: 1.38            # m: node column 3
+  margin: 0.3           # keep waypoints this far inside the edges (m)
+
+sweep:
+  lane_spacing: 1.0      # max distance between lanes (m); measure camera swath in the lab
+  lanes_along: x         # "x" = lanes run North-South, "y" = lanes run East-West
+  camera_offset_m: 0.0   # trajectory mode: drone -> middle of the camera's view on the floor (m).
+                         # The heading never changes, so the whole sweep is shifted this far
+                         # backwards so the VIEW, not the drone, covers the area. 0 = no shift,
+                         # for a camera looking straight down.
+  start_at_home: false    # true: at sweep start, move the whole plan (and the area box) so the first
+                         # waypoint is home, the takeoff spot. Only the area's SIZE then matters:
+                         # it extends +x (North) and +y (East) of home, lanes along lanes_along.
+                         # false: the area is fixed in the PX4 frame (x_min..y_max as written).
+  start_in_middle: false  # with start_at_home: home is at the MIDDLE of the area's starting edge, not
+                         # its corner. The lanes spread evenly either side of home, so the drone
+                         # first flies sideways to the first lane. false: waypoint 1 is home.
+
+network:
+  telem_port: 5005       # laptop UDP port telemetry arrives on
+  cmd_port: 5006         # drone UDP port commands (and camera keepalives) go to
+  camera_port: 5009      # laptop UDP port camera JPEG chunks arrive on
+  connect_timeout_s: 30.0  # give up if no telemetry within this time (s)
+  pose_history_s: 30.0     # how much timestamped telemetry to keep for pose lookups (s)
+  pose_lookup_tolerance_s: 0.25  # a lookup up to this far past the newest pose returns it (s)
+  mavlink_bridge_port: 8888      # ESP32 port that forwards MAVLink to PX4 (`calibrate`); firmware
+                                 # CONFIG_MAVROS_BRIDGE_IN_PORT
+  mavlink_listen_port: 14550     # laptop port PX4's MAVLink comes back on (QGroundControl's too:
+                                 # close QGC before `calibrate`); CONFIG_MAVROS_BRIDGE_OUT_PORT
+
+flight:
+  nav_mode: trajectory     # "trajectory": firmware plays the whole path, heading stays fixed
+                           # "waypoints": one GOTO per waypoint, drone turns to face each one
+  cruise_speed_mps: 0.30   # trajectory speed; in waypoints mode only used for timeouts (m/s)
+  traj_dt_s: 0.20          # trajectory sample period; the firmware interpolates between samples.
+                           # 0.20 = 2 cm spacing at 0.1 m/s and 6 upload packets for a full sweep (s)
+  traj_max_speed_mps: 0.40 # refuse faster trajectories; firmware caps at 0.50 (m/s)
+  traj_upload_gap_s: 0.06  # gap between upload packets; the ESP reads its queue of 6 at 10 Hz (s)
+  traj_start_timeout_s: 2.0  # re-upload if telemetry doesn't show TRAJ within this (s)
+  traj_start_attempts: 20  # upload attempts before abort-landing (count); 20 x 2 s = 40 s hovering
+  traj_end_margin_s: 10.0  # end-of-trajectory timeout = duration x traj_timeout_factor + this (s)
+  traj_timeout_factor: 4.0 # the setpoint waits for the drone, so allow this many times the planned time
+  turn_time_s: 4.0         # waypoints mode: allowance for turning at each waypoint (s)
+  takeoff_wait_s: 8.0      # minimum wait after CMD_START before probing for hover (s)
+  hover_radius_m: 0.10     # xy must stay within this radius to count as hovering (m)
+  hover_settle_s: 2.0      # ...for at least this long (s)
+  hover_timeout_s: 20.0    # abort-land if hover not confirmed this long after takeoff_wait_s (s)
+  arrival_radius_m: 0.25   # waypoint reached when horizontal distance <= this (m)
+  waypoint_timeout_margin_s: 10.0  # extra time per leg on top of distance/speed + turn (s)
+  goto_resend_s: 2.0       # resend GOTO if the drone hasn't started moving after this (s)
+  start_repeats: 3         # CMD_START copies sent (extras are ignored by firmware)
+  land_repeats: 3          # CMD_LAND copies sent (UDP can drop packets)
+  repeat_gap_s: 0.1        # gap between repeated command copies (s)
+  tick_hz: 10.0            # state machine tick rate (Hz)
+  stop_when_all_found: false  # return home as soon as tags.expected_count tags are confirmed
+  land_settle_s: 6.0       # after CMD_LAND, wait this long before calling the mission done (s)
+  land_radius_m: 0.08      # back home: precision landing moves over the home tag only if it is
+                           # further than this (m); about the hover wobble
+  land_hold_s: 1.0         # hover this long over the landing spot (and after each move), then land (s)
+  land_settle_max_s: 10.0  # land anyway this long after getting home, whatever (s)
+
+safety:
+  stale_timeout_s: 10.0        # abort-land if telemetry is older than this (s). The drone plays a
+                               # trajectory by itself, so short Wi-Fi gaps do not stop it flying
+  geofence_margin_m: 0.5       # abort-land if outside area (+ home) grown by this (m)
+  mission_time_limit_s: 600.0  # after this, stop searching, return and land (s)
+  require_gyro_cal: false      # true: `takeoff` is refused until `calibrate` has succeeded
+  gyro_cal_timeout_s: 30.0     # give up on a gyro calibration after this (s)
+
+camera:
+  fps: 0                       # stream rate 1-15 fps; 0 = firmware default (10)
+  quality: 0                   # JPEG quality 10-90; 0 = firmware default (60)
+  capture_latency_bias_s: 0.0  # extra shift of the estimated capture time, earlier (s)
+  use_frame_pose: true         # place tags with the pose the drone paired with each frame
+                               # (no Wi-Fi delay); false = laptop timing + latency bias
+  max_frame_pose_gap_ms: 100   # ignore a frame pose this far from a PX4 sample (ms)
+  fx: 0.0                      # lens focal lengths (px) for the tag pose; 0 = the course's
+  fy: 0.0                      # (163.5 / 153.2). Measure with tools/cam_bench.py
+
+tags:
+  tag_size_m: 0.112            # SEARCH tags: edge of the BLACK square, not the paper (m); course
+                               # tags are 120 mm. Localisation tags: localisation.tag_size_m
+  camera_pitch_deg: 90.0       # lens below the horizon: 90 = straight down, 45 = the old mount (deg)
+  camera_forward_m: 0.08       # lens position from the drone centre: forward (m) - MEASURE
+  camera_right_m: 0.0          #   right (m)
+  camera_down_m: 0.0           #   down (m)
+  min_decision_margin: 55.0    # detector gate, same as firmware (unitless)
+  max_hamming: 1               # detector gate, same as firmware (bits)
+  max_pose_err: 0.5            # reject poses with reprojection error above this (unitless)
+  max_detect_range_m: 1.5      # reject detections farther than this from the camera (m)
+  max_yaw_rate_deg_s: 30.0     # reject frames taken while turning faster than this (deg/s)
+  tags_on_floor: false         # true = ALL tags flat on the floor; course has some on walls
+  expected_down_m: 0.8         # floor only: expected tag "down" in body frame = flight height (m);
+                               # firmware menuconfig CRUISE_ALT_CM (80 cm)
+  down_tolerance_m: 0.15       # floor only: reject if |down - expected_down_m| > this (m)
+  min_down_m: -0.5             # walls too: reject tags more than 0.5 m ABOVE the drone (m, down +)
+  max_down_m: 0.95             # walls too: reject tags more than this BELOW the drone (m); keep it
+                               # above the flight height (0.8 m) or floor tags are all rejected
+  expected_count: 6            # tags in the area; 0 = unknown (disables early stop)
+  min_sightings: 5             # sightings needed (within confirm_radius_m) to confirm a tag
+  confirm_radius_m: 0.20       # sightings this close to the median count towards confirmation (m)
+  outlier_radius_m: 0.30       # sightings farther than this from the median are ignored (m)
+  max_sightings_per_tag: 400   # keep at most this many (newest) sightings per id (count)
+
+sim:
+  speed: 1.0                   # sim clock multiplier (1 = real time)
+  seed: 1                      # random seed, so sim runs are repeatable
+  arm_delay_s: 2.0             # fake CMD_START -> motors spinning (s)
+  climb_rate_mps: 0.2          # fake takeoff / landing vertical speed (m/s)
+  yaw_rate_deg_s: 45.0         # fake rotate-in-place speed (deg/s)
+  command_loss: 0.0            # probability each command datagram is lost (0-1)
+  camera_fps: 9.0              # fake camera frame rate (Hz)
+  false_positive_rate: 0.0     # probability per frame of one wrong-ID sighting (0-1)
+  pose_noise_m: 0.0            # std dev of fake telemetry position noise (m)
+  sighting_noise_m: 0.03       # std dev of fake tag body-frame position noise (m)
+  latency_s: 0.13              # fake camera capture -> laptop delay (s)
+  gyro_cal_s: 2.0              # fake `calibrate` takes this long (s)
+  view_half_width_m: 0.40      # fake camera sees a tag this far left/right of the drone (m)
+  view_min_m: -0.35            # ...from this far ahead (negative = behind the drone)... (m)
+  view_max_m: 0.28             # ...to this far ahead; a tag fits the 0.5 m view inside these (m)
+  true_tags:                   # fake tags at known positions, PX4 local NED (m); real course: 6 tags
+    - {id: 1, x: 0.35, y: 0.15}
+    - {id: 3, x: 0.80, y: 0.30}
+    - {id: 5, x: 1.30, y: 0.10}
+    - {id: 7, x: 1.20, y: 0.80}
+    - {id: 9, x: 0.60, y: 0.65}
+    - {id: 12, x: 0.25, y: 0.90}
+  # Fake odometry drift, to try the localisation correction (all 0 = PX4 is perfect).
+  # The localisation tags are placed at their arena positions, which the sim
+  # takes as the real world; PX4's frame then wanders away from it like this:
+  drift_scale: 0.0             # PX4 sees (1 + this) x the real distance, e.g. 0.05 (unitless)
+  drift_rot_deg: 0.0           # PX4's frame turned this far from the real one, e.g. 3 (deg, cw +)
+  drift_x_mps: 0.0             # PX4's position creeps this fast north while airborne (m/s)
+  drift_y_mps: 0.0             # ...and east (m/s), e.g. 0.0005 = 15 cm in a 5 min flight
+
+localisation:                  # known tags for drift correction + precision landing (localisation.py)
+  enabled: true
+  # Positions in the ARENA frame, measured on the floor tiles (m): origin = centre
+  # of the home tag, x = the way the drone faces when placed on it (= PX4 x, since
+  # PX4 has no compass and starts at heading 0), y = to its right.  Place the
+  # drone square on the home tag, facing along the search length.
+  # Set by clicking the grid: python mission/tools/loc_layout.py (ids 22-29;
+  # the tag on the start node is the home tag).
+  tag_size_m: 0.127              # printed size of the LOCALISATION tags' black square (m), if it
+                               # differs from the search tags'; 0 = same as tags.tag_size_m
+  home_tag_id: 29              # centre of the start box: precision landing + start/end drift fix
+  tags:
+    - {id: 29, x: 0.0, y: 0.0}   # home tag, start node (0, 0)
+    - {id: 25, x: 2.3, y: -0.92}   # node (-2, 5)
+    - {id: 23, x: 2.3, y: 0.46}   # node (1, 5)
+    - {id: 22, x: 4.14, y: -1.38}   # node (-3, 9)
+    - {id: 24, x: 4.14, y: 0.0}   # node (0, 9)
+  # Drift correction, run when the tag report is made (after the return, before
+  # landing).  Never sent to the drone: it only corrects the REPORTED tag positions.
+  drift_model: auto            # how the tag report is corrected: global (one transform, `model`
+                               # below) | time (drift at each visit, interpolated in time to when
+                               # each tag was seen) | hybrid (both) | auto (whichever predicts the
+                               # visits best, leave-one-out). auto: 2-7 cm vs 14-20 cm global
+  model: similarity            # similarity (turn + scale + shift) | rigid (turn + shift) | translation
+                               # falls back to fewer degrees of freedom if a fit fails its checks
+  visit_gap_s: 5.0             # sightings of one tag this far apart in time are separate visits (s)
+  min_visit_sightings: 5       # a visit needs this many sightings to count as a fix (count)
+  min_span_m: 1.0              # turn/scale need fixes spread at least this far apart (m)
+  max_rms_m: 0.15              # reject a fit whose fixes disagree by more than this (m)
+  max_rotation_deg: 20.0       # reject a fit that turns the map more than this (deg)
+  max_scale_error: 0.25        # similarity: reject scale outside 1 +- this (unitless)
+  # Precision landing on the home tag: after the return the drone is moved over
+  # the tag as seen now (so drift since takeoff doesn't land it off the box).
+  precision_landing: true
+  takeoff_home_tag: true       # fly home to where the home tag was seen at takeoff, not the takeoff pose
+  # Alignment: before the sweep, turn (and shift) the whole plan so it is square
+  # to the home tag, i.e. to the tiles, however the drone was put down. PX4 has no
+  # compass: its x axis is wherever the nose pointed at power-up. Needs the home
+  # tag taped square to the tiles (any of its 4 sides forward).
+  align_to_home_tag: true
+  align_max_deg: 15.0          # a bigger turn is taken as a wrong reading and ignored (deg)
+  # After landing, save correction.png (recorded vs corrected route and tags) and
+  # trajectory_corrected.csv in the run folder. Redo it later: tools/relocalise.py.
+  save_plot: true
+  # Test flights only: where the search tags really are (arena frame, m). Adds the
+  # error before/after correction to the report and the picture. [] on demo day.
+  truth_tags:
+    - {id: 2, x: 1.30, y: -1.35}
+    - {id: 4, x: 2.76, y: 0.92}
+    - {id: 6, x: 4.14, y: 0.92}
+  land_window_s: 2.0           # use home-tag sightings from this long (s)...
+  land_min_sightings: 5        # ...and at least this many of them (count)
+  land_max_offset_m: 1.0       # ignore a home-tag position this far from the takeoff spot (m);
+                               # flight 20261110_220437 needed 0.6
+  land_max_corrections: 3      # move over the tag at most this many times before landing (count)
+
+logging:
+  log_dir: mission/logs        # one sub-folder per run; relative paths are from cde1302/
+  level: INFO                  # console log level: DEBUG, INFO, WARNING, ERROR
+  status_period_s: 5.0         # how often a status line is logged while waiting / in --dry-run (s)
+
+live_map:                      # `python mission/mission.py --map ...`
+  redraw_hz: 5.0               # how often the map is redrawn (Hz); the mission still ticks at flight.tick_hz
+  arrow_m: 0.25                # length of the drone heading arrow on the map (m)
+  view_margin_m: 0.4           # empty space around the area / path / tags (m)
+  save_png: true               # save the final map as map.png in the run's log folder
+  show_camera: true            # camera panel with tag outlines next to the map
+  camera_stale_s: 2.0          # show NO VIDEO when the newest frame is older than this (s)
+
+uwb:                           # LinkTrack UWB -> PX4 alignment (mission/uwb_align.py)
+  send_to_px4: false           # work out the alignment in flight and send it to the drone. Needs
+                               # firmware CONFIG_UWB_SEND_TO_PX4; see UWB_PX4_FLIGHT_TEST.md
+  record: true                 # save every UWB reading to uwb.csv in the flight log, also when not
+                               # sent to PX4 (for tools/compare_flights.py). Uses UDP 5010, so
+                               # uwb_sniff.py and uwb_px4_bench.py can't run during a mission
+  debug_port: 5010             # UDP port of the drone's debug stream (CONFIG_UWB_DEBUG_PORT)
+  max_start_jump_m: 0.30       # don't send an alignment that would move PX4's position more than this (m)
+  align_solve_period_s: 1.0    # how often to try solving during the sweep (s)
+  align_max_px4_age_ms: 200    # ignore pairs whose PX4 position is older than this (ms)
+  mirror: "yes"               # "auto" | "yes" | "no" (keep the quotes).  yes = UWB y axis is flipped vs PX4.
+                               # auto needs a path with a turn; set it once the anchor test shows it.
+  align_min_samples: 50        # matched UWB/PX4 samples needed before solving (count)
+  align_min_span_m: 0.8        # path must extend at least this far (m)
+  align_min_spread_ratio: 0.05 # mirror=auto: path "width/length" (eigenvalue ratio) needed to tell a mirror
+  align_max_eop_m: 0.30        # ignore UWB samples whose precision estimate is worse (m)
+  align_max_rms_m: 0.10        # reject the fit if residuals are larger (m)
+  align_mirror_margin: 2.0     # mirror=auto: the other choice must fit this many times worse
+  align_outlier_k: 3.0         # drop samples with residual > k x median residual, then refit
