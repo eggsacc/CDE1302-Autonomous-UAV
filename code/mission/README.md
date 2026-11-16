@@ -19,7 +19,7 @@ slow and stop-go.
 
 ## 1. Setup (once per laptop)
 
-From `cde1302/`.
+From `code/`.
 
 **Laptop software:**
 
@@ -51,7 +51,7 @@ network, set that network to connect manually.
 
 1. Plug the ESP32 in over USB, and close QGroundControl, NAssistant and any
    serial monitor.
-2. In PowerShell, from `cde1302/`:
+2. In PowerShell, from `code/`:
 
 ```powershell
 . .\tools\idf_pinned.ps1

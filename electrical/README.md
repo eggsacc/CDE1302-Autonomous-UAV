@@ -1,7 +1,7 @@
 # Electrical
 
 Onboard hardware and how it connects. Firmware and laptop software are in
-[`../cde1302/`](../cde1302/).
+[`../code/`](../code/).
 
 ## Architecture
 
@@ -30,7 +30,7 @@ flowchart LR
 | Flight controller | PX4 *(TODO: board model)* | Attitude/position control. EKF2 fuses IMU + optical flow + rangefinder (no compass, no GPS) |
 | Companion computer | Seeed XIAO ESP32-S3 Sense | MAVLink bridge to PX4, trajectory player, camera streaming over Wi-Fi |
 | Camera | OV3660 on the XIAO Sense | Streams JPEG frames to the laptop for AprilTag detection |
-| Flow / height sensor | MTF-02P | Optical flow for x/y velocity, ToF rangefinder for height (cover: `mechanical/STLs/mtf02p_cover.stl`) |
+| Flow / height sensor | MTF-02P | Optical flow for x/y velocity, ToF rangefinder for height (cover: `frame/STLs/mtf02p_cover.stl`) |
 | Motors / ESCs | *(TODO)* | |
 | Battery | *(TODO: cells, capacity)* | |
 | Receiver | *(TODO)* | RC link with the kill switch, always kept in hand |
@@ -44,7 +44,7 @@ flowchart LR
 | MTF-02P | FC *(TODO: port)* | PX4: `EKF2_OF_CTRL` = Enabled, `EKF2_HGT_REF` = Range sensor |
 
 Pin settings live in `idf.py menuconfig` → *Drone Configuration*. The full PX4
-parameter list is in [`cde1302/mission/README.md`](../cde1302/mission/README.md#3-px4-parameters-qgroundcontrol).
+parameter list is in [`code/mission/README.md`](../code/mission/README.md#3-px4-parameters-qgroundcontrol).
 
 ## Network
 
@@ -60,8 +60,8 @@ motors (Wi-Fi kill switch).
 ## Fitted or supported, but not used
 
 - **LinkTrack UWB:** firmware and laptop support exist (`uwb_*` files), but our
-  flight area is too small for UWB to improve on optical flow. Datasheets are
-  in [`../UWB_documentation/`](../UWB_documentation/).
+  flight area is too small for UWB to improve on optical flow. The LinkTrack
+  datasheets are not included in the repo.
 - **VL53L5CX ToF ring:** obstacle avoidance from the course template.
   It is compiled out (`TOF_ENABLED 0` in `main/tof_task.h`).
 

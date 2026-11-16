@@ -12,7 +12,7 @@ operator starts it and holds the RC kill switch.
 
 Beyond the course baseline, the group also **redesigned the drone frame**. The
 course frame was meant for carbon fibre, but we print it in PLA, which made it
-flexible. The redesign is in `mechanical/`; its source repo is
+flexible. The redesign is in `frame/`; its source repo is
 `github.com/eggsacc/CDE1302-drone-frame`.
 
 ## Repo layout
@@ -20,16 +20,19 @@ flexible. The redesign is in `mechanical/`; its source repo is
 | Path | What | Origin |
 |---|---|---|
 | `README.md` | Short intro: mission, system + control block diagrams, links to subsystems | ours |
-| `cde1302/main/` | ESP32-S3 firmware (ESP-IDF, FreeRTOS) | course template (`esp-everything-qgc-bridge`), modified by us |
-| `cde1302/laptop/` | Course laptop tools: `comms.py`, `protocol.py`, `camera_stream.py`, `apriltag_host.py`, lab scripts | course. **Treat as read-only.** The mission imports it via `mission/laptop_path.py` |
-| `cde1302/mission/` | **Our mission code**: `mission.py` (state machine), `planner.py`, `trajectory.py`, `tag_pipeline.py`, `tag_map.py`, `localisation.py`, `live_map.py`, `sim.py`, `config.yaml`, tests, `tools/` | ours |
-| `cde1302/mission/logs/` | Per-run flight logs (gitignored; copy runs worth keeping elsewhere) | generated |
-| `cde1302/trajectory/`, `cde1302/waypoints/` | Lab 5 trajectory / waypoint material | course |
-| `cde1302/components/`, `managed_components/` | Vendored MAVLink, esp-apriltag, VL53L5CX, esp32-camera | third-party, don't edit |
-| `mechanical/` | Frame redesign: `README.md` (design notes + print guide), `STEP/`, `STLs/`, `assets/` | ours |
+| `code/main/` | ESP32-S3 firmware (ESP-IDF, FreeRTOS) | course template (`esp-everything-qgc-bridge`), modified by us |
+| `code/laptop/` | Course laptop tools: `comms.py`, `protocol.py`, `camera_stream.py`, `apriltag_host.py`, lab scripts | course. **Treat as read-only.** The mission imports it via `mission/laptop_path.py` |
+| `code/mission/` | **Our mission code**: `mission.py` (state machine), `planner.py`, `trajectory.py`, `tag_pipeline.py`, `tag_map.py`, `localisation.py`, `live_map.py`, `sim.py`, `config.yaml`, tests, `tools/` | ours |
+| `code/mission/logs/` | Per-run flight logs. Gitignored except the two demo flights, `full-exploration/` and `truncated-exploration-2/` | generated |
+| `code/trajectory/`, `code/waypoints/` | Lab 5 trajectory / waypoint material | course |
+| `code/components/`, `managed_components/` | Vendored MAVLink, esp-apriltag, VL53L5CX, esp32-camera | third-party, don't edit |
+| `frame/` | Frame redesign: `README.md` (design notes + print guide), `STEP/`, `STLs/`, `assets/` | ours |
 | `electrical/` | Hardware architecture, wiring, network | ours |
-| `UWB_documentation/` | LinkTrack UWB datasheets | reference only |
-| `report/` | Final report (generated .docx), its scripts, figures and copies of the 3 demo-flight logs. **Read `report/AGENT_NOTES.md` first** | ours |
+| `code/AGENTS.md` | Agent guide for working inside `code/` | ours |
+
+Not in the repo (gitignored, local only): `UWB_documentation/` (LinkTrack
+datasheets) and `odom_analysis/` (report analysis). The final report lives
+outside the repo.
 
 ## Documentation rules (from the user)
 
@@ -103,7 +106,7 @@ code exists in `uwb_*` files, `uwb.send_to_px4` should stay `false`) and the
 - Addresses: drone `192.168.1.(200+ID)`, laptop `192.168.1.(100+ID)`. Our
   drone is **ID 2**, so the drone is .202 and the laptop .102.
 
-## Commands (run from `cde1302/`, Windows, conda env `cde1302-laptop`)
+## Commands (run from `code/`, Windows, conda env `cde1302-laptop`)
 
 ```bash
 python -m pytest mission/tests -q              # all mission + C-module tests, no hardware
@@ -128,6 +131,7 @@ Flashing (PowerShell, **separate window**, because it swaps that window's Python
 | `docs/restructure` | This documentation restructure, based on `claude-one-shot` |
 | `feature/loc-tags` | Off `docs/restructure`: localisation tags 27-29 (drift-corrected report, precision landing), full tag16h5 table 0-29 |
 | `feature/loc-tags-waypoints` | `feature/loc-tags` with the firmware back on waypoint mode (`CONFIG_TRAJ_WAYPOINTS`, 15 cm corners), to compare against follow mode |
+| `reports` | Report analysis, then the final repo restructure (`code/`, `frame/`) |
 | `uwb-testing`, `nikidudu`, `yaw_test_lab5` | Older experiments |
 
 ## Gotchas
@@ -138,14 +142,14 @@ Flashing (PowerShell, **separate window**, because it swaps that window's Python
   `laptop/apriltag_host.py`). The laptop detector rebuilds itself; it needs
   the conda env's MinGW-w64 gcc on PATH, because an old `C:\MinGW` gcc fails.
 
-- `cde1302/CLAUDE.md` and parts of `cde1302/README.md` come from the upstream
-  course template. They describe a SAFMC swarm, onboard detection and ToF
-  obstacle avoidance, which this project doesn't use. Trust `mission/` docs
-  and this file over them.
-- `CONFIG_HOST_IPV4_ADDR` in `cde1302/QGC_MAVLINK_BRIDGE.md` (192.168.50.x) is
+- `code/laptop/` docs (e.g. `TEST_GUIDE.md`) come from the upstream course
+  template and use example drone 22. The swarm, VFH and ToF code they mention
+  isn't used by this project. Trust `code/AGENTS.md`, `mission/` docs and this
+  file over them.
+- `CONFIG_HOST_IPV4_ADDR` in `code/QGC_MAVLINK_BRIDGE.md` (192.168.50.x) is
   stale; the real value is in `sdkconfig`.
 - Only one camera viewer can stream at a time. Don't run `tag_stream.py`
   alongside `mission.py`.
 - Open TODOs: image placeholders across the docs; TODOs in
   `electrical/README.md` (FC model, motors, battery, power budget); duplicate
-  `* - Copy.stl` files in `mechanical/STLs/`.
+  `* - Copy.stl` files in `frame/STLs/`.
